@@ -8,8 +8,8 @@ const initialTasks = [
   { id: 2, name: 'Task Beta', start: new Date(2026, 4, 9), end: new Date(2026, 4, 16) },
 ]
 
-function getColumns(offset) {
-  return Array.from({ length: 14 }, (_, i) => {
+function getColumns(offset, visibleDays) {
+  return Array.from({ length: visibleDays }, (_, i) => {
     const date = new Date(today)
     date.setDate(today.getDate() + offset + i)
     return { label: date.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' }), date: new Date(date) }
@@ -28,7 +28,8 @@ const DAY_MS = 1000 * 60 * 60 * 24
 function App() {
   const [offset, setOffset] = useState(0)
   const [tasks, setTasks] = useState(initialTasks)
-  const columns = getColumns(offset)
+  const [visibleDays, setVisibleDays] = useState(14)
+  const columns = getColumns(offset, visibleDays)
   const dragRef = useRef(null)
 
   useEffect(() => {
@@ -65,7 +66,7 @@ function App() {
   }, [])
 
   const handleBarMouseDown = (e, task) => {
-    const colWidth = e.currentTarget.closest('table').offsetWidth / 15
+    const colWidth = e.currentTarget.closest('table').offsetWidth / (visibleDays + 1)
     dragRef.current = {
       taskId: task.id,
       startX: e.clientX,
@@ -80,9 +81,17 @@ function App() {
   return (
     <div className="app">
       <h1>Tabella 14 colonne</h1>
-      <div style={{ marginBottom: '12px', display: 'flex', gap: '8px' }}>
+      <div style={{ marginBottom: '12px', display: 'flex', gap: '8px', alignItems: 'center' }}>
         <button onClick={() => setOffset(o => o - 1)}>&#8592; Giorno precedente</button>
         <button onClick={() => setOffset(o => o + 1)}>Giorno successivo &#8594;</button>
+        <span style={{ marginLeft: '16px', fontSize: '12px' }}>Mostra:</span>
+        {[7, 14, 30, 60].map(d => (
+          <button
+            key={d}
+            onClick={() => setVisibleDays(d)}
+            style={{ fontWeight: visibleDays === d ? 'bold' : 'normal', textDecoration: visibleDays === d ? 'underline' : 'none' }}
+          >{d}g</button>
+        ))}
       </div>
       <table border="1" cellPadding="4" cellSpacing="0" style={{ tableLayout: 'fixed', width: '100%', borderCollapse: 'collapse' }}>
         <thead>
@@ -102,7 +111,7 @@ function App() {
               <tr key={task.id}>
                 <td style={{ fontSize: '11px', border: '1px solid #d1d5db' }}>{task.name}</td>
                 {firstActive === -1 ? (
-                  <td colSpan={14} style={{ border: 'none' }}></td>
+                  <td colSpan={visibleDays} style={{ border: 'none' }}></td>
                 ) : (
                   <>
                     {firstActive > 0 && <td colSpan={firstActive} style={{ border: 'none' }}></td>}
@@ -115,7 +124,7 @@ function App() {
                         style={{ background: '#3b82f6', height: '100%', borderRadius: '4px', cursor: 'grab' }}
                       ></div>
                     </td>
-                    {lastActive < 13 && <td colSpan={13 - lastActive} style={{ border: 'none' }}></td>}
+                    {lastActive < visibleDays - 1 && <td colSpan={visibleDays - 1 - lastActive} style={{ border: 'none' }}></td>}
                   </>
                 )}
               </tr>
