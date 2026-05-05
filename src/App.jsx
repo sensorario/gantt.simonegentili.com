@@ -229,79 +229,80 @@ function App() {
 
   return (
     <div className="app">
-      <h1>Tabella 14 colonne</h1>
-      <div style={{ marginBottom: '12px', display: 'flex', gap: '8px', alignItems: 'center' }}>
-        <button onClick={() => setOffset(o => o - 1)}>&#8592; Giorno precedente</button>
-        <button onClick={() => setOffset(o => o + 1)}>Giorno successivo &#8594;</button>
-        <span style={{ marginLeft: '16px', fontSize: '12px' }}>Mostra:</span>
+      <h1>Gantt</h1>
+      <div className="gantt-header">
+        <button className="btn" onClick={() => setOffset(o => o - 1)}>&#8592;</button>
+        <button className="btn" onClick={() => setOffset(o => o + 1)}>&#8594;</button>
+        <span className="subtitle">Mostra:</span>
         {[7, 14, 30, 60].map(d => (
           <button
             key={d}
+            className={`btn${visibleDays === d ? ' active' : ''}`}
             onClick={() => setVisibleDays(d)}
-            style={{ fontWeight: visibleDays === d ? 'bold' : 'normal', textDecoration: visibleDays === d ? 'underline' : 'none' }}
           >{d}g</button>
         ))}
       </div>
-      <div ref={containerRef} style={{ position: 'relative' }}>
-        <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }}>
-          {arrows.map(({ id, x1, y1, x2, y2 }) => (
-            <path
-              key={id}
-              d={`M${x1},${y1} C${x1 - 40},${y1} ${x2 + 40},${y2} ${x2},${y2}`}
-              stroke="#ef4444" strokeWidth="2" fill="none"
-            />
-          ))}
-        </svg>
-        <table border="1" cellPadding="4" cellSpacing="0" style={{ tableLayout: 'fixed', width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr>
-              <th style={{ width: '120px', fontSize: '11px', border: '1px solid #d1d5db' }}>Nome</th>
-              {columns.map(({ label }) => (
-                <th key={label} style={{ width: '7%', fontSize: '11px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', border: '1px solid #d1d5db' }}>{label}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {tasks.map((task) => {
-              const firstActive = columns.findIndex(({ date }) => isBetween(date, task.start, task.end))
-              const lastActive = columns.findLastIndex(({ date }) => isBetween(date, task.start, task.end))
+      <div className="gantt-card">
+        <div ref={containerRef} style={{ position: 'relative' }}>
+          <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }}>
+            {arrows.map(({ id, x1, y1, x2, y2 }) => (
+              <path
+                key={id}
+                className="dep-line"
+                d={`M${x1},${y1} C${x1 - 40},${y1} ${x2 + 40},${y2} ${x2},${y2}`}
+              />
+            ))}
+          </svg>
+          <table className="gantt-table">
+            <thead>
+              <tr>
+                <th className="col-name">Task</th>
+                {columns.map(({ label }) => (
+                  <th key={label}>{label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {tasks.map((task) => {
+                const firstActive = columns.findIndex(({ date }) => isBetween(date, task.start, task.end))
+                const lastActive = columns.findLastIndex(({ date }) => isBetween(date, task.start, task.end))
 
-              return (
-                <tr
-                  key={task.id}
-                  ref={el => rowRefs.current[task.id] = el}
-                  style={{ outline: dragOverId === task.id ? '2px solid #f59e0b' : 'none' }}
-                >
-                  <td style={{ fontSize: '11px', border: '1px solid #d1d5db', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span
-                      onMouseDown={() => { rowDragRef.current = { taskId: task.id } }}
-                      style={{ cursor: 'grab', color: '#9ca3af', userSelect: 'none', fontSize: '14px' }}
-                    >⠿</span>
-                    {task.name}
-                  </td>
-                  {firstActive === -1 ? (
-                    <td colSpan={visibleDays} style={{ border: 'none' }}></td>
-                  ) : (
-                    <>
-                      {firstActive > 0 && <td colSpan={firstActive} style={{ border: 'none' }}></td>}
-                      <td
-                        colSpan={lastActive - firstActive + 1}
-                        style={{ height: '36px', padding: '4px', verticalAlign: 'middle', border: 'none' }}
-                      >
-                        <div
-                          ref={el => barRefs.current[task.id] = el}
-                          onMouseDown={(e) => handleBarMouseDown(e, task)}
-                          style={{ background: '#3b82f6', height: '100%', borderRadius: '4px', cursor: 'grab' }}
-                        ></div>
-                      </td>
-                      {lastActive < visibleDays - 1 && <td colSpan={visibleDays - 1 - lastActive} style={{ border: 'none' }}></td>}
-                    </>
-                  )}
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+                return (
+                  <tr
+                    key={task.id}
+                    ref={el => rowRefs.current[task.id] = el}
+                    className={dragOverId === task.id ? 'drop-target' : ''}
+                  >
+                    <td className="cell-name">
+                      <div className="cell-name-inner">
+                        <span
+                          className="drag-handle"
+                          onMouseDown={() => { rowDragRef.current = { taskId: task.id } }}
+                        >⠿</span>
+                        {task.name}
+                      </div>
+                    </td>
+                    {firstActive === -1 ? (
+                      <td colSpan={visibleDays}></td>
+                    ) : (
+                      <>
+                        {firstActive > 0 && <td colSpan={firstActive}></td>}
+                        <td colSpan={lastActive - firstActive + 1} className="cell-bar">
+                          <div
+                            className="bar"
+                            ref={el => barRefs.current[task.id] = el}
+                            onMouseDown={(e) => handleBarMouseDown(e, task)}
+                          ></div>
+                        </td>
+                        {lastActive < visibleDays - 1 && <td colSpan={visibleDays - 1 - lastActive}></td>}
+                      </>
+                    )}
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   )
