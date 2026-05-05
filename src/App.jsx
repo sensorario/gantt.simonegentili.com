@@ -84,12 +84,12 @@ function App() {
         <button onClick={() => setOffset(o => o - 1)}>&#8592; Giorno precedente</button>
         <button onClick={() => setOffset(o => o + 1)}>Giorno successivo &#8594;</button>
       </div>
-      <table border="1" cellPadding="4" cellSpacing="0" style={{ tableLayout: 'fixed', width: '100%' }}>
+      <table border="1" cellPadding="4" cellSpacing="0" style={{ tableLayout: 'fixed', width: '100%', borderCollapse: 'collapse' }}>
         <thead>
           <tr>
-            <th style={{ width: '120px', fontSize: '11px' }}>Nome</th>
+            <th style={{ width: '120px', fontSize: '11px', border: '1px solid #d1d5db' }}>Nome</th>
             {columns.map(({ label }) => (
-              <th key={label} style={{ width: '7%', fontSize: '11px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</th>
+              <th key={label} style={{ width: '7%', fontSize: '11px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', border: '1px solid #d1d5db' }}>{label}</th>
             ))}
           </tr>
         </thead>
@@ -100,22 +100,22 @@ function App() {
 
             return (
               <tr key={task.id}>
-                <td style={{ fontSize: '11px' }}>{task.name}</td>
+                <td style={{ fontSize: '11px', border: '1px solid #d1d5db' }}>{task.name}</td>
                 {firstActive === -1 ? (
-                  <td colSpan={14}></td>
+                  <td colSpan={14} style={{ border: 'none' }}></td>
                 ) : (
                   <>
-                    {firstActive > 0 && <td colSpan={firstActive}></td>}
+                    {firstActive > 0 && <td colSpan={firstActive} style={{ border: 'none' }}></td>}
                     <td
                       colSpan={lastActive - firstActive + 1}
-                      style={{ height: '36px', padding: '4px', verticalAlign: 'middle' }}
+                      style={{ height: '36px', padding: '4px', verticalAlign: 'middle', border: 'none' }}
                     >
                       <div
                         onMouseDown={(e) => handleBarMouseDown(e, task)}
                         style={{ background: '#3b82f6', height: '100%', borderRadius: '4px', cursor: 'grab' }}
                       ></div>
                     </td>
-                    {lastActive < 13 && <td colSpan={13 - lastActive}></td>}
+                    {lastActive < 13 && <td colSpan={13 - lastActive} style={{ border: 'none' }}></td>}
                   </>
                 )}
               </tr>
