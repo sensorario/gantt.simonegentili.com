@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import './App.css'
 
 const today = new Date(2026, 4, 6)
 
-const tasks = [
+const initialTasks = [
   { id: 1, name: 'Task Alpha', start: new Date(2026, 4, 6), end: new Date(2026, 4, 10) },
   { id: 2, name: 'Task Beta', start: new Date(2026, 4, 9), end: new Date(2026, 4, 16) },
 ]
@@ -23,9 +23,13 @@ function isBetween(date, start, end) {
   return d >= s && d <= e
 }
 
+const DAY_MS = 1000 * 60 * 60 * 24
+
 function App() {
   const [offset, setOffset] = useState(0)
+  const [tasks, setTasks] = useState(initialTasks)
   const columns = getColumns(offset)
+  const dragRef = useRef(null)
 
   useEffect(() => {
     const handleKey = (e) => {
@@ -35,6 +39,43 @@ function App() {
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
   }, [])
+
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      if (!dragRef.current) return
+      const { taskId, startX, colWidth } = dragRef.current
+      const deltaX = e.clientX - startX
+      const deltaDays = Math.round(deltaX / colWidth)
+      if (deltaDays === dragRef.current.lastDelta) return
+      dragRef.current.lastDelta = deltaDays
+      setTasks(prev => prev.map(t => {
+        if (t.id !== taskId) return t
+        const newStart = new Date(dragRef.current.origStart.getTime() + deltaDays * DAY_MS)
+        const newEnd = new Date(dragRef.current.origEnd.getTime() + deltaDays * DAY_MS)
+        return { ...t, start: newStart, end: newEnd }
+      }))
+    }
+    const handleMouseUp = () => { dragRef.current = null }
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [])
+
+  const handleBarMouseDown = (e, task) => {
+    const colWidth = e.currentTarget.closest('table').offsetWidth / 15
+    dragRef.current = {
+      taskId: task.id,
+      startX: e.clientX,
+      colWidth,
+      origStart: new Date(task.start),
+      origEnd: new Date(task.end),
+      lastDelta: 0,
+    }
+    e.preventDefault()
+  }
 
   return (
     <div className="app">
@@ -69,7 +110,10 @@ function App() {
                       colSpan={lastActive - firstActive + 1}
                       style={{ height: '36px', padding: '4px', verticalAlign: 'middle' }}
                     >
-                      <div style={{ background: '#3b82f6', height: '100%', borderRadius: '4px' }}></div>
+                      <div
+                        onMouseDown={(e) => handleBarMouseDown(e, task)}
+                        style={{ background: '#3b82f6', height: '100%', borderRadius: '4px', cursor: 'grab' }}
+                      ></div>
                     </td>
                     {lastActive < 13 && <td colSpan={13 - lastActive}></td>}
                   </>
