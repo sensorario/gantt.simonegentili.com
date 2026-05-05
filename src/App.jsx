@@ -3,10 +3,33 @@ import './App.css'
 
 const today = new Date(2026, 4, 6)
 
-const initialTasks = [
-  { id: 1, name: 'Task Alpha', start: new Date(2026, 4, 6), end: new Date(2026, 4, 8) },
-  { id: 2, name: 'Task Beta', start: new Date(2026, 4, 9), end: new Date(2026, 4, 16), dependsOn: 1 },
-  { id: 3, name: 'Task Gamma', start: new Date(2026, 4, 10), end: new Date(2026, 4, 11), dependsOn: 1 },
+const initialProjects = [
+  {
+    id: 1,
+    name: 'Progetto Alpha',
+    tasks: [
+      { id: 1, name: 'Pianificazione', start: new Date(2026, 4, 6), end: new Date(2026, 4, 8) },
+      { id: 2, name: 'Design', start: new Date(2026, 4, 9), end: new Date(2026, 4, 16), dependsOn: 1 },
+      { id: 3, name: 'Sviluppo', start: new Date(2026, 4, 17), end: new Date(2026, 4, 25), dependsOn: 2 },
+    ],
+  },
+  {
+    id: 2,
+    name: 'Progetto Beta',
+    tasks: [
+      { id: 4, name: 'Analisi', start: new Date(2026, 4, 6), end: new Date(2026, 4, 10) },
+      { id: 5, name: 'Implementazione', start: new Date(2026, 4, 11), end: new Date(2026, 4, 20), dependsOn: 4 },
+    ],
+  },
+  {
+    id: 3,
+    name: 'Progetto Gamma',
+    tasks: [
+      { id: 6, name: 'Setup', start: new Date(2026, 4, 6), end: new Date(2026, 4, 7) },
+      { id: 7, name: 'Testing', start: new Date(2026, 4, 8), end: new Date(2026, 4, 14), dependsOn: 6 },
+      { id: 8, name: 'Deploy', start: new Date(2026, 4, 15), end: new Date(2026, 4, 16), dependsOn: 7 },
+    ],
+  },
 ]
 
 function getColumns(offset, visibleDays) {
@@ -71,7 +94,8 @@ function resolveConstraints(tasks, movedId) {
 
 function App() {
   const [offset, setOffset] = useState(0)
-  const [tasks, setTasks] = useState(initialTasks)
+  const [projects, setProjects] = useState(initialProjects)
+  const [selectedProjectId, setSelectedProjectId] = useState(null) // null = tutti
   const [visibleDays, setVisibleDays] = useState(14)
   const [arrows, setArrows] = useState([])
   const columns = getColumns(offset, visibleDays)
@@ -81,6 +105,20 @@ function App() {
   const barRefs = useRef({})
   const rowRefs = useRef({})
   const containerRef = useRef(null)
+
+  // Righe visibili: task raggruppati per progetto con header progetto
+  const visibleProjects = selectedProjectId === null
+    ? projects
+    : projects.filter(p => p.id === selectedProjectId)
+
+  // tasks flat per i vincoli (solo quelli visibili)
+  const flatTasks = visibleProjects.flatMap(p => p.tasks)
+
+  const setProjectTasks = (projectId, updater) => {
+    setProjects(prev => prev.map(p =>
+      p.id === projectId ? { ...p, tasks: updater(p.tasks) } : p
+    ))
+  }
 
   useEffect(() => {
     const handleKey = (e) => {
@@ -94,14 +132,14 @@ function App() {
   useEffect(() => {
     const handleMouseMove = (e) => {
       if (!dragRef.current) return
-      const { taskId, startX, colWidth } = dragRef.current
+      const { taskId, projectId, startX, colWidth } = dragRef.current
 
       // spostamento orizzontale → cambia date
       const deltaX = e.clientX - startX
       const deltaDays = Math.round(deltaX / colWidth)
       if (deltaDays !== dragRef.current.lastDelta) {
         dragRef.current.lastDelta = deltaDays
-        setTasks(prev => {
+        setProjectTasks(projectId, prev => {
           const updated = prev.map(t => {
             if (t.id !== taskId) return t
             return {
@@ -128,15 +166,15 @@ function App() {
     }
     const handleMouseUp = () => {
       if (!dragRef.current) return
-      const { taskId } = dragRef.current
+      const { taskId, projectId } = dragRef.current
       dragRef.current = null
 
-      // riordina riga se c'è una destinazione verticale
       setDragOverId(prev => {
         if (prev !== null && prev !== taskId) {
-          setTasks(tasks => {
+          setProjectTasks(projectId, tasks => {
             const fromIdx = tasks.findIndex(t => t.id === taskId)
             const toIdx = tasks.findIndex(t => t.id === prev)
+            if (fromIdx === -1 || toIdx === -1) return tasks
             const next = [...tasks]
             const [moved] = next.splice(fromIdx, 1)
             next.splice(toIdx, 0, moved)
@@ -170,15 +208,16 @@ function App() {
     }
     const handleRowMouseUp = () => {
       if (!rowDragRef.current) return
-      const { taskId } = rowDragRef.current
+      const { taskId, projectId } = rowDragRef.current
       rowDragRef.current = null
       if (dragOverId === null || dragOverId === taskId) {
         setDragOverId(null)
         return
       }
-      setTasks(prev => {
+      setProjectTasks(projectId, prev => {
         const fromIdx = prev.findIndex(t => t.id === taskId)
         const toIdx = prev.findIndex(t => t.id === dragOverId)
+        if (fromIdx === -1 || toIdx === -1) return prev
         const next = [...prev]
         const [moved] = next.splice(fromIdx, 1)
         next.splice(toIdx, 0, moved)
@@ -194,10 +233,11 @@ function App() {
     }
   }, [dragOverId])
 
-  const handleBarMouseDown = (e, task) => {
+  const handleBarMouseDown = (e, task, projectId) => {
     const colWidth = e.currentTarget.closest('table').offsetWidth / (visibleDays + 1)
     dragRef.current = {
       taskId: task.id,
+      projectId,
       startX: e.clientX,
       colWidth,
       origStart: new Date(task.start),
@@ -211,7 +251,7 @@ function App() {
     if (!containerRef.current) return
     const containerRect = containerRef.current.getBoundingClientRect()
     const newArrows = []
-    for (const task of tasks) {
+    for (const task of flatTasks) {
       if (!task.dependsOn) continue
       const fromEl = barRefs.current[task.id]
       const toEl = barRefs.current[task.dependsOn]
@@ -225,7 +265,7 @@ function App() {
       newArrows.push({ id: `${task.dependsOn}-${task.id}`, x1, y1, x2, y2 })
     }
     setArrows(prev => JSON.stringify(prev) === JSON.stringify(newArrows) ? prev : newArrows)
-  }, [tasks])
+  }, [flatTasks])
 
   return (
     <div className="app">
@@ -233,13 +273,25 @@ function App() {
       <div className="gantt-header">
         <button className="btn" onClick={() => setOffset(o => o - 1)}>&#8592;</button>
         <button className="btn" onClick={() => setOffset(o => o + 1)}>&#8594;</button>
-        <span className="subtitle">Mostra:</span>
+        <span className="subtitle">Giorni:</span>
         {[7, 14, 30, 60].map(d => (
           <button
             key={d}
             className={`btn${visibleDays === d ? ' active' : ''}`}
             onClick={() => setVisibleDays(d)}
           >{d}g</button>
+        ))}
+        <span className="subtitle" style={{ marginLeft: '12px' }}>Progetto:</span>
+        <button
+          className={`btn${selectedProjectId === null ? ' active' : ''}`}
+          onClick={() => setSelectedProjectId(null)}
+        >Tutti</button>
+        {projects.map(p => (
+          <button
+            key={p.id}
+            className={`btn${selectedProjectId === p.id ? ' active' : ''}`}
+            onClick={() => setSelectedProjectId(p.id)}
+          >{p.name}</button>
         ))}
       </div>
       <div className="gantt-card">
@@ -263,43 +315,52 @@ function App() {
               </tr>
             </thead>
             <tbody>
-              {tasks.map((task) => {
-                const firstActive = columns.findIndex(({ date }) => isBetween(date, task.start, task.end))
-                const lastActive = columns.findLastIndex(({ date }) => isBetween(date, task.start, task.end))
-
-                return (
-                  <tr
-                    key={task.id}
-                    ref={el => rowRefs.current[task.id] = el}
-                    className={dragOverId === task.id ? 'drop-target' : ''}
-                  >
-                    <td className="cell-name">
-                      <div className="cell-name-inner">
-                        <span
-                          className="drag-handle"
-                          onMouseDown={() => { rowDragRef.current = { taskId: task.id } }}
-                        >⠿</span>
-                        {task.name}
-                      </div>
+              {visibleProjects.map(project => (
+                <>
+                  <tr key={`proj-${project.id}`} className="project-header-row">
+                    <td className="project-header-cell" colSpan={visibleDays + 1}>
+                      {project.name}
                     </td>
-                    {firstActive === -1 ? (
-                      <td colSpan={visibleDays}></td>
-                    ) : (
-                      <>
-                        {firstActive > 0 && <td colSpan={firstActive}></td>}
-                        <td colSpan={lastActive - firstActive + 1} className="cell-bar">
-                          <div
-                            className="bar"
-                            ref={el => barRefs.current[task.id] = el}
-                            onMouseDown={(e) => handleBarMouseDown(e, task)}
-                          ></div>
-                        </td>
-                        {lastActive < visibleDays - 1 && <td colSpan={visibleDays - 1 - lastActive}></td>}
-                      </>
-                    )}
                   </tr>
-                )
-              })}
+                  {project.tasks.map((task) => {
+                    const firstActive = columns.findIndex(({ date }) => isBetween(date, task.start, task.end))
+                    const lastActive = columns.findLastIndex(({ date }) => isBetween(date, task.start, task.end))
+
+                    return (
+                      <tr
+                        key={task.id}
+                        ref={el => rowRefs.current[task.id] = el}
+                        className={dragOverId === task.id ? 'drop-target' : ''}
+                      >
+                        <td className="cell-name">
+                          <div className="cell-name-inner">
+                            <span
+                              className="drag-handle"
+                              onMouseDown={() => { rowDragRef.current = { taskId: task.id, projectId: project.id } }}
+                            >⠿</span>
+                            {task.name}
+                          </div>
+                        </td>
+                        {firstActive === -1 ? (
+                          <td colSpan={visibleDays}></td>
+                        ) : (
+                          <>
+                            {firstActive > 0 && <td colSpan={firstActive}></td>}
+                            <td colSpan={lastActive - firstActive + 1} className="cell-bar">
+                              <div
+                                className="bar"
+                                ref={el => barRefs.current[task.id] = el}
+                                onMouseDown={(e) => handleBarMouseDown(e, task, project.id)}
+                              ></div>
+                            </td>
+                            {lastActive < visibleDays - 1 && <td colSpan={visibleDays - 1 - lastActive}></td>}
+                          </>
+                        )}
+                      </tr>
+                    )
+                  })}
+                </>
+              ))}
             </tbody>
           </table>
         </div>

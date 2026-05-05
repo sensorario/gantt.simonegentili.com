@@ -163,3 +163,18 @@
   stroke-dasharray: 5 3;
   fill: none;
 }
+
+.project-header-row {
+  background: #f1f5f9;
+}
+
+.project-header-cell {
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  border-top: 1px solid #e2e8f0;
+  border-bottom: 1px solid #e2e8f0;
+}
