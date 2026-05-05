@@ -53,17 +53,30 @@ function App() {
           </tr>
         </thead>
         <tbody>
-          {tasks.map((task) => (
-            <tr key={task.id}>
-              <td style={{ fontSize: '11px' }}>{task.name}</td>
-              {columns.map(({ label, date }) => {
-                const active = isBetween(date, task.start, task.end)
-                return (
-                  <td key={label} style={{ padding: 0, height: '28px', background: active ? '#3b82f6' : 'transparent' }}></td>
-                )
-              })}
-            </tr>
-          ))}
+          {tasks.map((task) => {
+            const firstActive = columns.findIndex(({ date }) => isBetween(date, task.start, task.end))
+            const lastActive = columns.findLastIndex(({ date }) => isBetween(date, task.start, task.end))
+
+            return (
+              <tr key={task.id}>
+                <td style={{ fontSize: '11px' }}>{task.name}</td>
+                {firstActive === -1 ? (
+                  <td colSpan={14}></td>
+                ) : (
+                  <>
+                    {firstActive > 0 && <td colSpan={firstActive}></td>}
+                    <td
+                      colSpan={lastActive - firstActive + 1}
+                      style={{ height: '36px', padding: '4px', verticalAlign: 'middle' }}
+                    >
+                      <div style={{ background: '#3b82f6', height: '100%', borderRadius: '4px' }}></div>
+                    </td>
+                    {lastActive < 13 && <td colSpan={13 - lastActive}></td>}
+                  </>
+                )}
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     </div>
