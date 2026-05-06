@@ -101,6 +101,7 @@ function App() {
   const columns = getColumns(offset, visibleDays)
   const dragRef = useRef(null)
   const rowDragRef = useRef(null)
+  const timelineDragRef = useRef(null)
   const [dragOverId, setDragOverId] = useState(null)
   const barRefs = useRef({})
   const rowRefs = useRef({})
@@ -127,6 +128,24 @@ function App() {
     }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
+  }, [])
+
+  useEffect(() => {
+    const handleTimelineMove = (e) => {
+      if (!timelineDragRef.current) return
+      const { startX, startOffset, colWidth } = timelineDragRef.current
+      const deltaX = e.clientX - startX
+      const deltaDays = -Math.round(deltaX / colWidth)
+      const newOffset = startOffset + deltaDays
+      setOffset(newOffset)
+    }
+    const handleTimelineUp = () => { timelineDragRef.current = null }
+    window.addEventListener('mousemove', handleTimelineMove)
+    window.addEventListener('mouseup', handleTimelineUp)
+    return () => {
+      window.removeEventListener('mousemove', handleTimelineMove)
+      window.removeEventListener('mouseup', handleTimelineUp)
+    }
   }, [])
 
   useEffect(() => {
@@ -306,7 +325,14 @@ function App() {
             ))}
           </svg>
           <table className="gantt-table">
-            <thead>
+            <thead
+              onMouseDown={(e) => {
+                const colWidth = e.currentTarget.closest('table').offsetWidth / (visibleDays + 1)
+                timelineDragRef.current = { startX: e.clientX, startOffset: offset, colWidth }
+                e.preventDefault()
+              }}
+              style={{ cursor: 'ew-resize', userSelect: 'none' }}
+            >
               <tr>
                 <th className="col-name">Task</th>
                 {columns.map(({ label }) => (
