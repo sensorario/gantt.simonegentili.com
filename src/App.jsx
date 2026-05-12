@@ -28,6 +28,8 @@ const initialProjects = [
       { id: 6, name: 'Setup', start: new Date(2026, 4, 6), end: new Date(2026, 4, 7) },
       { id: 7, name: 'Testing', start: new Date(2026, 4, 8), end: new Date(2026, 4, 14), dependsOn: 6 },
       { id: 8, name: 'Deploy', start: new Date(2026, 4, 15), end: new Date(2026, 4, 16), dependsOn: 7 },
+      { id: 9, name: 'React, TypeScript & Next.js', start: new Date(2026, 4, 15), end: new Date(2026, 4, 16), dependsOn: 7 },
+      { id: 10, name: 'React 19.2', start: new Date(2026, 4, 15), end: new Date(2026, 4, 16), dependsOn: 7 },
     ],
   },
 ]
