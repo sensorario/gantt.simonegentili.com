@@ -1,10 +1,11 @@
 * { box-sizing: border-box; }
 
 .app {
-  min-height: 100vh;
   background: #f1f5f9;
   padding: 32px 24px;
   font-family: system-ui, 'Segoe UI', sans-serif;
+  border-radius: 12px;
+  box-shadow: var(--shadow);
 }
 
 .app h1 {
