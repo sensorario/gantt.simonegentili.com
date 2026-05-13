@@ -9,8 +9,8 @@ const initialProjects = [
     name: 'Progetto Alpha',
     tasks: [
       { id: 1, name: 'Pianificazione', start: new Date(2026, 4, 6), end: new Date(2026, 4, 8) },
-      { id: 2, name: 'Design', start: new Date(2026, 4, 9), end: new Date(2026, 4, 16), dependsOn: 1 },
-      { id: 3, name: 'Sviluppo', start: new Date(2026, 4, 17), end: new Date(2026, 4, 25), dependsOn: 2 },
+      { id: 2, name: 'Design', start: new Date(2026, 4, 9), end: new Date(2026, 4, 16), dependsOn: [1] },
+      { id: 3, name: 'Sviluppo', start: new Date(2026, 4, 17), end: new Date(2026, 4, 25), dependsOn: [2] },
     ],
   },
   {
@@ -18,7 +18,7 @@ const initialProjects = [
     name: 'Progetto Beta',
     tasks: [
       { id: 4, name: 'Analisi', start: new Date(2026, 4, 6), end: new Date(2026, 4, 10) },
-      { id: 5, name: 'Implementazione', start: new Date(2026, 4, 11), end: new Date(2026, 4, 20), dependsOn: 4 },
+      { id: 5, name: 'Implementazione', start: new Date(2026, 4, 11), end: new Date(2026, 4, 20), dependsOn: [4] },
     ],
   },
   {
@@ -26,10 +26,10 @@ const initialProjects = [
     name: 'Progetto Gamma',
     tasks: [
       { id: 6, name: 'Setup', start: new Date(2026, 4, 6), end: new Date(2026, 4, 7) },
-      { id: 7, name: 'Testing', start: new Date(2026, 4, 8), end: new Date(2026, 4, 14), dependsOn: 6 },
-      { id: 8, name: 'Deploy', start: new Date(2026, 4, 15), end: new Date(2026, 4, 16), dependsOn: 7 },
-      { id: 9, name: 'React, TypeScript & Next.js', start: new Date(2026, 4, 15), end: new Date(2026, 4, 16), dependsOn: 7 },
-      { id: 10, name: 'React 19.2', start: new Date(2026, 4, 15), end: new Date(2026, 4, 16), dependsOn: 7 },
+      { id: 7, name: 'Testing', start: new Date(2026, 4, 8), end: new Date(2026, 4, 14), dependsOn: [6] },
+      { id: 8, name: 'Deploy', start: new Date(2026, 4, 15), end: new Date(2026, 4, 16), dependsOn: [7] },
+      { id: 9, name: 'React, TypeScript & Next.js', start: new Date(2026, 4, 17), end: new Date(2026, 4, 20), dependsOn: [7, 8] },
+      { id: 10, name: 'React 19.2', start: new Date(2026, 4, 15), end: new Date(2026, 4, 16), dependsOn: [7] },
     ],
   },
 ]
@@ -60,34 +60,38 @@ function resolveConstraints(tasks, movedId) {
   while (changed) {
     changed = false
     for (const child of result) {
-      if (!child.dependsOn) continue
-      const parent = result.find(t => t.id === child.dependsOn)
-      if (!parent) continue
+      const deps = Array.isArray(child.dependsOn) ? child.dependsOn : child.dependsOn ? [child.dependsOn] : []
+      if (deps.length === 0) continue
 
-      const overlap = child.start.getTime() <= parent.end.getTime()
-      if (!overlap) continue
+      for (const depId of deps) {
+        const parent = result.find(t => t.id === depId)
+        if (!parent) continue
 
-      const isParentMoved = parent.id === movedId || pushedRight.has(parent.id)
-      const isChildMoved = child.id === movedId || pushedLeft.has(child.id)
+        const overlap = child.start.getTime() <= parent.end.getTime()
+        if (!overlap) continue
 
-      if (isParentMoved && !isChildMoved) {
-        const dur = child.end.getTime() - child.start.getTime()
-        child.start = new Date(parent.end.getTime() + DAY_MS)
-        child.end = new Date(child.start.getTime() + dur)
-        pushedRight.add(child.id)
-        changed = true
-      } else if (isChildMoved && !isParentMoved) {
-        const dur = parent.end.getTime() - parent.start.getTime()
-        parent.end = new Date(child.start.getTime() - DAY_MS)
-        parent.start = new Date(parent.end.getTime() - dur)
-        pushedLeft.add(parent.id)
-        changed = true
-      } else if (!isParentMoved && !isChildMoved) {
-        const dur = child.end.getTime() - child.start.getTime()
-        child.start = new Date(parent.end.getTime() + DAY_MS)
-        child.end = new Date(child.start.getTime() + dur)
-        pushedRight.add(child.id)
-        changed = true
+        const isParentMoved = parent.id === movedId || pushedRight.has(parent.id)
+        const isChildMoved = child.id === movedId || pushedLeft.has(child.id)
+
+        if (isParentMoved && !isChildMoved) {
+          const dur = child.end.getTime() - child.start.getTime()
+          child.start = new Date(parent.end.getTime() + DAY_MS)
+          child.end = new Date(child.start.getTime() + dur)
+          pushedRight.add(child.id)
+          changed = true
+        } else if (isChildMoved && !isParentMoved) {
+          const dur = parent.end.getTime() - parent.start.getTime()
+          parent.end = new Date(child.start.getTime() - DAY_MS)
+          parent.start = new Date(parent.end.getTime() - dur)
+          pushedLeft.add(parent.id)
+          changed = true
+        } else if (!isParentMoved && !isChildMoved) {
+          const dur = child.end.getTime() - child.start.getTime()
+          child.start = new Date(parent.end.getTime() + DAY_MS)
+          child.end = new Date(child.start.getTime() + dur)
+          pushedRight.add(child.id)
+          changed = true
+        }
       }
     }
   }
@@ -273,17 +277,20 @@ function App() {
     const containerRect = containerRef.current.getBoundingClientRect()
     const newArrows = []
     for (const task of flatTasks) {
-      if (!task.dependsOn) continue
-      const fromEl = barRefs.current[task.id]
-      const toEl = barRefs.current[task.dependsOn]
-      if (!fromEl || !toEl) continue
-      const fromRect = fromEl.getBoundingClientRect()
-      const toRect = toEl.getBoundingClientRect()
-      const x1 = fromRect.left - containerRect.left
-      const y1 = fromRect.top - containerRect.top + fromRect.height / 2
-      const x2 = toRect.right - containerRect.left
-      const y2 = toRect.top - containerRect.top + toRect.height / 2
-      newArrows.push({ id: `${task.dependsOn}-${task.id}`, x1, y1, x2, y2 })
+      const deps = Array.isArray(task.dependsOn) ? task.dependsOn : task.dependsOn ? [task.dependsOn] : []
+      if (deps.length === 0) continue
+      for (const depId of deps) {
+        const fromEl = barRefs.current[task.id]
+        const toEl = barRefs.current[depId]
+        if (!fromEl || !toEl) continue
+        const fromRect = fromEl.getBoundingClientRect()
+        const toRect = toEl.getBoundingClientRect()
+        const x1 = fromRect.left - containerRect.left
+        const y1 = fromRect.top - containerRect.top + fromRect.height / 2
+        const x2 = toRect.right - containerRect.left
+        const y2 = toRect.top - containerRect.top + toRect.height / 2
+        newArrows.push({ id: `${depId}-${task.id}`, x1, y1, x2, y2 })
+      }
     }
     setArrows(prev => JSON.stringify(prev) === JSON.stringify(newArrows) ? prev : newArrows)
   }, [flatTasks])
