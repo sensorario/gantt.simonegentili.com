@@ -1,5 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import './App.css'
+import { SGFooter } from '@sensorario/sg-components'
 
 const today = new Date(2026, 4, 6)
 
@@ -296,111 +297,116 @@ function App() {
   }, [flatTasks])
 
   return (
-    <div className="app">
-      <h1>Gantt</h1>
-      <div className="gantt-header">
-        <button className="btn" onClick={() => setOffset(o => o - 1)}>&#8592;</button>
-        <button className="btn" onClick={() => setOffset(o => o + 1)}>&#8594;</button>
-        <span className="subtitle">Giorni:</span>
-        {[7, 14, 30, 60].map(d => (
-          <button
-            key={d}
-            className={`btn${visibleDays === d ? ' active' : ''}`}
-            onClick={() => setVisibleDays(d)}
-          >{d}g</button>
-        ))}
-        <span className="subtitle" style={{ marginLeft: '12px' }}>Progetto:</span>
-        <button
-          className={`btn${selectedProjectId === null ? ' active' : ''}`}
-          onClick={() => setSelectedProjectId(null)}
-        >Tutti</button>
-        {projects.map(p => (
-          <button
-            key={p.id}
-            className={`btn${selectedProjectId === p.id ? ' active' : ''}`}
-            onClick={() => setSelectedProjectId(p.id)}
-          >{p.name}</button>
-        ))}
-      </div>
-      <div className="gantt-card">
-        <div ref={containerRef} style={{ position: 'relative' }}>
-          <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }}>
-            {arrows.map(({ id, x1, y1, x2, y2 }) => (
-              <path
-                key={id}
-                className="dep-line"
-                d={`M${x1},${y1} C${x1 - 40},${y1} ${x2 + 40},${y2} ${x2},${y2}`}
-              />
-            ))}
-          </svg>
-          <table className="gantt-table">
-            <thead
-              onMouseDown={(e) => {
-                const colWidth = e.currentTarget.closest('table').offsetWidth / (visibleDays + 1)
-                timelineDragRef.current = { startX: e.clientX, startOffset: offset, colWidth }
-                e.preventDefault()
-              }}
-              style={{ cursor: 'ew-resize', userSelect: 'none' }}
-            >
-              <tr>
-                <th className="col-name">Task</th>
-                {columns.map(({ label }) => (
-                  <th key={label}>{label}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {visibleProjects.map(project => (
-                <>
-                  <tr key={`proj-${project.id}`} className="project-header-row">
-                    <td className="project-header-cell" colSpan={visibleDays + 1}>
-                      {project.name}
-                    </td>
-                  </tr>
-                  {project.tasks.map((task) => {
-                    const firstActive = columns.findIndex(({ date }) => isBetween(date, task.start, task.end))
-                    const lastActive = columns.findLastIndex(({ date }) => isBetween(date, task.start, task.end))
 
-                    return (
-                      <tr
-                        key={task.id}
-                        ref={el => rowRefs.current[task.id] = el}
-                        className={dragOverId === task.id ? 'drop-target' : ''}
-                      >
-                        <td className="cell-name">
-                          <div className="cell-name-inner">
-                            <span
-                              className="drag-handle"
-                              onMouseDown={() => { rowDragRef.current = { taskId: task.id, projectId: project.id } }}
-                            >⠿</span>
-                            {task.name}
-                          </div>
-                        </td>
-                        {firstActive === -1 ? (
-                          <td colSpan={visibleDays}></td>
-                        ) : (
-                          <>
-                            {firstActive > 0 && <td colSpan={firstActive}></td>}
-                            <td colSpan={lastActive - firstActive + 1} className="cell-bar">
-                              <div
-                                className="bar"
-                                ref={el => barRefs.current[task.id] = el}
-                                onMouseDown={(e) => handleBarMouseDown(e, task, project.id)}
-                              ></div>
-                            </td>
-                            {lastActive < visibleDays - 1 && <td colSpan={visibleDays - 1 - lastActive}></td>}
-                          </>
-                        )}
-                      </tr>
-                    )
-                  })}
-                </>
+    <>
+
+      <div className="app">
+        <h1>Gantt</h1>
+        <div className="gantt-header">
+          <button className="btn" onClick={() => setOffset(o => o - 1)}>&#8592;</button>
+          <button className="btn" onClick={() => setOffset(o => o + 1)}>&#8594;</button>
+          <span className="subtitle">Giorni:</span>
+          {[7, 14, 30, 60].map(d => (
+            <button
+              key={d}
+              className={`btn${visibleDays === d ? ' active' : ''}`}
+              onClick={() => setVisibleDays(d)}
+            >{d}g</button>
+          ))}
+          <span className="subtitle" style={{ marginLeft: '12px' }}>Progetto:</span>
+          <button
+            className={`btn${selectedProjectId === null ? ' active' : ''}`}
+            onClick={() => setSelectedProjectId(null)}
+          >Tutti</button>
+          {projects.map(p => (
+            <button
+              key={p.id}
+              className={`btn${selectedProjectId === p.id ? ' active' : ''}`}
+              onClick={() => setSelectedProjectId(p.id)}
+            >{p.name}</button>
+          ))}
+        </div>
+        <div className="gantt-card">
+          <div ref={containerRef} style={{ position: 'relative' }}>
+            <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }}>
+              {arrows.map(({ id, x1, y1, x2, y2 }) => (
+                <path
+                  key={id}
+                  className="dep-line"
+                  d={`M${x1},${y1} C${x1 - 40},${y1} ${x2 + 40},${y2} ${x2},${y2}`}
+                />
               ))}
-            </tbody>
-          </table>
+            </svg>
+            <table className="gantt-table">
+              <thead
+                onMouseDown={(e) => {
+                  const colWidth = e.currentTarget.closest('table').offsetWidth / (visibleDays + 1)
+                  timelineDragRef.current = { startX: e.clientX, startOffset: offset, colWidth }
+                  e.preventDefault()
+                }}
+                style={{ cursor: 'ew-resize', userSelect: 'none' }}
+              >
+                <tr>
+                  <th className="col-name">Task</th>
+                  {columns.map(({ label }) => (
+                    <th key={label}>{label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {visibleProjects.map(project => (
+                  <>
+                    <tr key={`proj-${project.id}`} className="project-header-row">
+                      <td className="project-header-cell" colSpan={visibleDays + 1}>
+                        {project.name}
+                      </td>
+                    </tr>
+                    {project.tasks.map((task) => {
+                      const firstActive = columns.findIndex(({ date }) => isBetween(date, task.start, task.end))
+                      const lastActive = columns.findLastIndex(({ date }) => isBetween(date, task.start, task.end))
+
+                      return (
+                        <tr
+                          key={task.id}
+                          ref={el => rowRefs.current[task.id] = el}
+                          className={dragOverId === task.id ? 'drop-target' : ''}
+                        >
+                          <td className="cell-name">
+                            <div className="cell-name-inner">
+                              <span
+                                className="drag-handle"
+                                onMouseDown={() => { rowDragRef.current = { taskId: task.id, projectId: project.id } }}
+                              >⠿</span>
+                              {task.name}
+                            </div>
+                          </td>
+                          {firstActive === -1 ? (
+                            <td colSpan={visibleDays}></td>
+                          ) : (
+                            <>
+                              {firstActive > 0 && <td colSpan={firstActive}></td>}
+                              <td colSpan={lastActive - firstActive + 1} className="cell-bar">
+                                <div
+                                  className="bar"
+                                  ref={el => barRefs.current[task.id] = el}
+                                  onMouseDown={(e) => handleBarMouseDown(e, task, project.id)}
+                                ></div>
+                              </td>
+                              {lastActive < visibleDays - 1 && <td colSpan={visibleDays - 1 - lastActive}></td>}
+                            </>
+                          )}
+                        </tr>
+                      )
+                    })}
+                  </>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
-    </div>
+      <SGFooter />
+    </>
   )
 }
 
