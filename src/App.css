@@ -2,10 +2,13 @@
 
 .app {
   background: #f1f5f9;
-  padding: 32px 24px;
   font-family: system-ui, 'Segoe UI', sans-serif;
   border-radius: 12px;
   box-shadow: var(--shadow);
+  padding: 24px;
+  margin: 24px auto;
+  align-self: center;
+  width: 100%;
 }
 
 .app h1 {
@@ -19,6 +22,7 @@
 .gantt-header {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 10px;
   margin-bottom: 16px;
   flex-wrap: wrap;
@@ -152,10 +156,31 @@
   cursor: grab;
   box-shadow: 0 1px 3px rgba(59,130,246,0.4);
   transition: filter 0.15s;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 6px;
+  overflow: hidden;
 }
 
 .bar:hover {
   filter: brightness(1.08);
+}
+
+.bar-date {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.95);
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.15s;
+  pointer-events: none;
+  flex-shrink: 0;
+}
+
+.bar:hover .bar-date {
+  opacity: 1;
 }
 
 .dep-line {
@@ -163,6 +188,19 @@
   stroke-width: 1.5;
   stroke-dasharray: 5 3;
   fill: none;
+}
+
+.today-line {
+  stroke: #ef4444;
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+  opacity: 0.5;
+}
+
+.gantt-table th.col-today {
+  color: #ef4444;
+  font-weight: 700;
+  border-bottom: 2px solid #ef4444;
 }
 
 .project-header-row {

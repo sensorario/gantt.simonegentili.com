@@ -25,6 +25,7 @@ This is a Gantt chart web application built with **React 19** and **Vite**. It v
 - Task dependency (`dependsOn`) can be a single ID or an array of IDs
 - `resolveConstraints` propagates date shifts when tasks are dragged, respecting parent→child ordering
 - Italian locale (`it-IT`) is used for date formatting
+- `getColumns` returns an `isToday` flag on the column matching the real current date; used to apply `.col-today` CSS class and render a vertical SVG line overlay
 - Keep all Gantt state inside `App.jsx`; extract sub-components only when clearly reusable
 
 ## Development Commands

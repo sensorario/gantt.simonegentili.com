@@ -1,39 +1,32 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import './App.css'
 import { SGFooter } from '@sensorario/sg-components'
+import { Temporal } from '@js-temporal/polyfill'
+import { initialProjects } from './data/projects'
 
-const today = new Date(2026, 4, 1)
-
-const initialProjects = [
-  {
-    id: 3,
-    name: 'Scrivere',
-    tasks: [
-      { id: 234, name: 'JavaScript // II edition', start: new Date(2026, 0, 1), end: new Date(2026, 5, 1) },
-      { id: 987, name: 'TypeScript // II edition', start: new Date(2026, 5, 1), end: new Date(2026, 8, 1), dependsOn: 234 },
-    ],
-  },
-]
+const today = Temporal.PlainDate.from('2026-05-01')
 
 function getColumns(offset, visibleDays) {
+  const now = Temporal.Now.plainDateISO()
   return Array.from({ length: visibleDays }, (_, i) => {
-    const date = new Date(today)
-    date.setDate(today.getDate() + offset + i)
-    return { label: date.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' }), date: new Date(date) }
+    const date = today.add({ days: offset + i })
+    return {
+      label: date.toLocaleString('it-IT', { day: '2-digit', month: '2-digit' }),
+      date,
+      isToday: Temporal.PlainDate.compare(date, now) === 0,
+    }
   })
 }
 
 function isBetween(date, start, end) {
-  const d = date.getTime()
-  const s = new Date(start.getFullYear(), start.getMonth(), start.getDate()).getTime()
-  const e = new Date(end.getFullYear(), end.getMonth(), end.getDate()).getTime()
-  return d >= s && d <= e
+  return (
+    Temporal.PlainDate.compare(date, start) >= 0 &&
+    Temporal.PlainDate.compare(date, end) <= 0
+  )
 }
 
-const DAY_MS = 1000 * 60 * 60 * 24
-
 function resolveConstraints(tasks, movedId) {
-  const result = tasks.map(t => ({ ...t, start: new Date(t.start), end: new Date(t.end) }))
+  const result = tasks.map(t => ({ ...t }))
   const pushedRight = new Set()
   const pushedLeft = new Set()
 
@@ -48,28 +41,28 @@ function resolveConstraints(tasks, movedId) {
         const parent = result.find(t => t.id === depId)
         if (!parent) continue
 
-        const overlap = child.start.getTime() <= parent.end.getTime()
+        const overlap = Temporal.PlainDate.compare(child.start, parent.end) <= 0
         if (!overlap) continue
 
         const isParentMoved = parent.id === movedId || pushedRight.has(parent.id)
         const isChildMoved = child.id === movedId || pushedLeft.has(child.id)
 
         if (isParentMoved && !isChildMoved) {
-          const dur = child.end.getTime() - child.start.getTime()
-          child.start = new Date(parent.end.getTime() + DAY_MS)
-          child.end = new Date(child.start.getTime() + dur)
+          const dur = child.start.until(child.end, { largestUnit: 'days' }).days
+          child.start = parent.end.add({ days: 1 })
+          child.end = child.start.add({ days: dur })
           pushedRight.add(child.id)
           changed = true
         } else if (isChildMoved && !isParentMoved) {
-          const dur = parent.end.getTime() - parent.start.getTime()
-          parent.end = new Date(child.start.getTime() - DAY_MS)
-          parent.start = new Date(parent.end.getTime() - dur)
+          const dur = parent.start.until(parent.end, { largestUnit: 'days' }).days
+          parent.end = child.start.subtract({ days: 1 })
+          parent.start = parent.end.subtract({ days: dur })
           pushedLeft.add(parent.id)
           changed = true
         } else if (!isParentMoved && !isChildMoved) {
-          const dur = child.end.getTime() - child.start.getTime()
-          child.start = new Date(parent.end.getTime() + DAY_MS)
-          child.end = new Date(child.start.getTime() + dur)
+          const dur = child.start.until(child.end, { largestUnit: 'days' }).days
+          child.start = parent.end.add({ days: 1 })
+          child.end = child.start.add({ days: dur })
           pushedRight.add(child.id)
           changed = true
         }
@@ -83,12 +76,15 @@ function App() {
   const [offset, setOffset] = useState(0)
   const [projects, setProjects] = useState(initialProjects)
   const [selectedProjectId, setSelectedProjectId] = useState(null) // null = tutti
-  const [visibleDays, setVisibleDays] = useState(14)
+  const [visibleDays, setVisibleDays] = useState(180)
   const [arrows, setArrows] = useState([])
+  const [todayLine, setTodayLine] = useState(null)
   const columns = getColumns(offset, visibleDays)
+  const todayIndex = columns.findIndex(c => c.isToday)
   const dragRef = useRef(null)
   const rowDragRef = useRef(null)
   const timelineDragRef = useRef(null)
+  const todayColRef = useRef(null)
   const [dragOverId, setDragOverId] = useState(null)
   const barRefs = useRef({})
   const rowRefs = useRef({})
@@ -150,8 +146,8 @@ function App() {
             if (t.id !== taskId) return t
             return {
               ...t,
-              start: new Date(dragRef.current.origStart.getTime() + deltaDays * DAY_MS),
-              end: new Date(dragRef.current.origEnd.getTime() + deltaDays * DAY_MS),
+              start: dragRef.current.origStart.add({ days: deltaDays }),
+              end: dragRef.current.origEnd.add({ days: deltaDays }),
             }
           })
           return resolveConstraints(updated, taskId)
@@ -246,8 +242,8 @@ function App() {
       projectId,
       startX: e.clientX,
       colWidth,
-      origStart: new Date(task.start),
-      origEnd: new Date(task.end),
+      origStart: task.start,
+      origEnd: task.end,
       lastDelta: 0,
     }
     e.preventDefault()
@@ -275,6 +271,19 @@ function App() {
     }
     setArrows(prev => JSON.stringify(prev) === JSON.stringify(newArrows) ? prev : newArrows)
   }, [flatTasks])
+
+  useLayoutEffect(() => {
+    if (!containerRef.current || todayIndex === -1 || !todayColRef.current) {
+      setTodayLine(null)
+      return
+    }
+    const containerRect = containerRef.current.getBoundingClientRect()
+    const colRect = todayColRef.current.getBoundingClientRect()
+    setTodayLine({
+      x: colRect.left - containerRect.left + colRect.width / 2,
+      height: containerRect.height,
+    })
+  }, [offset, visibleDays, todayIndex])
 
   return (
 
@@ -309,6 +318,13 @@ function App() {
         <div className="gantt-card">
           <div ref={containerRef} style={{ position: 'relative' }}>
             <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }}>
+              {todayLine && (
+                <line
+                  x1={todayLine.x} y1={0}
+                  x2={todayLine.x} y2={todayLine.height}
+                  className="today-line"
+                />
+              )}
               {arrows.map(({ id, x1, y1, x2, y2 }) => (
                 <path
                   key={id}
@@ -328,8 +344,12 @@ function App() {
               >
                 <tr>
                   <th className="col-name">Task</th>
-                  {columns.map(({ label }) => (
-                    <th key={label}>{label}</th>
+                  {columns.map(({ label, isToday }) => (
+                    <th
+                      key={label}
+                      className={isToday ? 'col-today' : undefined}
+                      ref={isToday ? todayColRef : null}
+                    >{label}</th>
                   ))}
                 </tr>
               </thead>
@@ -370,7 +390,14 @@ function App() {
                                   className="bar"
                                   ref={el => barRefs.current[task.id] = el}
                                   onMouseDown={(e) => handleBarMouseDown(e, task, project.id)}
-                                ></div>
+                                >
+                                  <span className="bar-date bar-date-start">
+                                    {task.start.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                                  </span>
+                                  <span className="bar-date bar-date-end">
+                                    {task.end.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                                  </span>
+                                </div>
                               </td>
                               {lastActive < visibleDays - 1 && <td colSpan={visibleDays - 1 - lastActive}></td>}
                             </>

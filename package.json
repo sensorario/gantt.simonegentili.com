@@ -10,7 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@sensorario/sg-components": "^0.0.34",
+    "@js-temporal/polyfill": "^0.5.1",
+    "@sensorario/sg-components": "^0.0.62",
     "react": "^19.2.5",
     "react-dom": "^19.2.5"
   },
