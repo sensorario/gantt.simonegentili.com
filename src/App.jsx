@@ -2,35 +2,15 @@ import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import './App.css'
 import { SGFooter } from '@sensorario/sg-components'
 
-const today = new Date(2026, 4, 6)
+const today = new Date(2026, 4, 1)
 
 const initialProjects = [
   {
-    id: 1,
-    name: 'Progetto Alpha',
-    tasks: [
-      { id: 1, name: 'Pianificazione', start: new Date(2026, 4, 6), end: new Date(2026, 4, 8) },
-      { id: 2, name: 'Design', start: new Date(2026, 4, 9), end: new Date(2026, 4, 16), dependsOn: [1] },
-      { id: 3, name: 'Sviluppo', start: new Date(2026, 4, 17), end: new Date(2026, 4, 25), dependsOn: [2] },
-    ],
-  },
-  {
-    id: 2,
-    name: 'Progetto Beta',
-    tasks: [
-      { id: 4, name: 'Analisi', start: new Date(2026, 4, 6), end: new Date(2026, 4, 10) },
-      { id: 5, name: 'Implementazione', start: new Date(2026, 4, 11), end: new Date(2026, 4, 20), dependsOn: [4] },
-    ],
-  },
-  {
     id: 3,
-    name: 'Progetto Gamma',
+    name: 'Scrivere',
     tasks: [
-      { id: 6, name: 'Setup', start: new Date(2026, 4, 6), end: new Date(2026, 4, 7) },
-      { id: 7, name: 'Testing', start: new Date(2026, 4, 8), end: new Date(2026, 4, 14), dependsOn: [6] },
-      { id: 8, name: 'Deploy', start: new Date(2026, 4, 15), end: new Date(2026, 4, 16), dependsOn: [7] },
-      { id: 9, name: 'React, TypeScript & Next.js', start: new Date(2026, 4, 17), end: new Date(2026, 4, 20), dependsOn: [7, 8] },
-      { id: 10, name: 'React 19.2', start: new Date(2026, 4, 15), end: new Date(2026, 4, 16), dependsOn: [7] },
+      { id: 234, name: 'JavaScript // II edition', start: new Date(2026, 0, 1), end: new Date(2026, 5, 1) },
+      { id: 987, name: 'TypeScript // II edition', start: new Date(2026, 5, 1), end: new Date(2026, 8, 1), dependsOn: 234 },
     ],
   },
 ]
@@ -306,7 +286,7 @@ function App() {
           <button className="btn" onClick={() => setOffset(o => o - 1)}>&#8592;</button>
           <button className="btn" onClick={() => setOffset(o => o + 1)}>&#8594;</button>
           <span className="subtitle">Giorni:</span>
-          {[7, 14, 30, 60].map(d => (
+          {[90, 180, 365].map(d => (
             <button
               key={d}
               className={`btn${visibleDays === d ? ' active' : ''}`}
