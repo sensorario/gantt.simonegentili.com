@@ -86,7 +86,7 @@ export const initialProjects = [
             {
                 id: 101,
                 name: "Stesura master",
-                start: Temporal.PlainDate.from("2026-04-01"),
+                start: Temporal.PlainDate.from("2026-02-17"),
                 end: Temporal.PlainDate.from("2026-07-01"),
             },
             {
