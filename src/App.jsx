@@ -1,10 +1,24 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import './App.css'
-import { SGFooter } from '@sensorario/sg-components'
+import { SGFooter, QuadratoHeader } from '@sensorario/sg-components'
 import { Temporal } from '@js-temporal/polyfill'
 import { initialProjects } from './data/projects'
 
 const today = Temporal.PlainDate.from('2026-05-01')
+
+// Cookie condiviso su .simonegentili.com: un utente già autenticato su un
+// altro prodotto della famiglia (es. quadrato) risulta loggato anche qui.
+const AUTH_URL = 'https://api.simonegentili.com/quadrato/authenticate'
+const COOKIE_NAME = 'simonegentili.com-access-token'
+const USERNAME_KEY = 'simonegentili.com-username'
+
+function setAuthCookie(token) {
+  document.cookie = `${COOKIE_NAME}=${token}; path=/; domain=.simonegentili.com; secure; samesite=strict`
+}
+
+function clearAuthCookie() {
+  document.cookie = `${COOKIE_NAME}=; path=/; domain=.simonegentili.com; expires=Thu, 01 Jan 1970 00:00:00 GMT; secure; samesite=strict`
+}
 
 function getColumns(offset, visibleDays) {
   const now = Temporal.Now.plainDateISO()
@@ -73,6 +87,29 @@ function resolveConstraints(tasks, movedId) {
 }
 
 function App() {
+  const [username, setUsername] = useState(() => localStorage.getItem(USERNAME_KEY))
+
+  const handleLogin = async (loginUsername, password) => {
+    const res = await fetch(AUTH_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: loginUsername, password }),
+    })
+    if (!res.ok) {
+      throw new Error('Authentication failed')
+    }
+    const { token } = await res.json()
+    localStorage.setItem(USERNAME_KEY, loginUsername)
+    setAuthCookie(token)
+    setUsername(loginUsername)
+  }
+
+  const handleLogout = () => {
+    clearAuthCookie()
+    localStorage.removeItem(USERNAME_KEY)
+    setUsername(null)
+  }
+
   const [offset, setOffset] = useState(0)
   const [projects, setProjects] = useState(initialProjects)
   const [selectedProjectId, setSelectedProjectId] = useState(null) // null = tutti
@@ -290,7 +327,12 @@ function App() {
     <>
 
       <div className="app">
-        <h1>Gantt</h1>
+        <QuadratoHeader
+          title="Gantt"
+          username={username}
+          onLogin={handleLogin}
+          onLogout={handleLogout}
+        />
         <div className="gantt-header">
           <button className="btn" onClick={() => setOffset(o => o - 1)}>&#8592;</button>
           <button className="btn" onClick={() => setOffset(o => o + 1)}>&#8594;</button>
