@@ -4,7 +4,7 @@ import { SGFooter, QuadratoHeader } from '@sensorario/sg-components'
 import { Temporal } from '@js-temporal/polyfill'
 import { initialProjects } from './data/projects'
 
-const today = Temporal.PlainDate.from('2026-05-01')
+const today = Temporal.Now.plainDateISO()
 
 // Cookie condiviso su .simonegentili.com: un utente già autenticato su un
 // altro prodotto della famiglia (es. quadrato) risulta loggato anche qui.
@@ -325,14 +325,13 @@ function App() {
   return (
 
     <>
-
+      <QuadratoHeader
+        title="Gantt"
+        username={username}
+        onLogin={handleLogin}
+        onLogout={handleLogout}
+      />
       <div className="app">
-        <QuadratoHeader
-          title="Gantt"
-          username={username}
-          onLogin={handleLogin}
-          onLogout={handleLogout}
-        />
         <div className="gantt-header">
           <button className="btn" onClick={() => setOffset(o => o - 1)}>&#8592;</button>
           <button className="btn" onClick={() => setOffset(o => o + 1)}>&#8594;</button>

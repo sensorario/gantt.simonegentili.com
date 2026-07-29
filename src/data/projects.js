@@ -80,39 +80,6 @@ export const initialProjects = [
         ],
     },
     {
-        id: 1,
-        name: "JavaScript II Edizione",
-        tasks: [
-            {
-                id: 101,
-                name: "Stesura master",
-                start: Temporal.PlainDate.from("2026-02-17"),
-                end: Temporal.PlainDate.from("2026-07-01"),
-            },
-            {
-                id: 102,
-                name: "Revisioni",
-                start: Temporal.PlainDate.from("2026-07-01"),
-                end: Temporal.PlainDate.from("2026-08-01"),
-                dependsOn: [101],
-            },
-            {
-                id: 103,
-                name: "Pubblicazione Paperback",
-                start: Temporal.PlainDate.from("2026-08-05"),
-                end: Temporal.PlainDate.from("2026-08-10"),
-                dependsOn: [102],
-            },
-            {
-                id: 104,
-                name: "Pubblicazione ebook",
-                start: Temporal.PlainDate.from("2026-08-10"),
-                end: Temporal.PlainDate.from("2026-08-15"),
-                dependsOn: [103],
-            },
-        ],
-    },
-    {
         id: 5,
         name: "React II Edizione",
         tasks: [
@@ -120,21 +87,21 @@ export const initialProjects = [
                 id: 501,
                 name: "Stesura master",
                 start: Temporal.PlainDate.from("2026-06-04"),
-                end: Temporal.PlainDate.from("2026-10-10"),
-            },
-            {
-                id: 503,
-                name: "Revisione master",
-                start: Temporal.PlainDate.from("2026-11-01"),
-                end: Temporal.PlainDate.from("2026-12-31"),
-                dependsOn: [501],
+                end: Temporal.PlainDate.from("2026-10-15"),
             },
             {
                 id: 504,
                 name: "Pubblicazione Paperback",
-                start: Temporal.PlainDate.from("2027-01-01"),
-                end: Temporal.PlainDate.from("2027-01-10"),
-                dependsOn: [503, 409],
+                start: Temporal.PlainDate.from("2026-10-26"),
+                end: Temporal.PlainDate.from("2026-11-10"),
+                dependsOn: [501, 409],
+            },
+            {
+                id: 505,
+                name: "Pubblicazione ebook",
+                start: Temporal.PlainDate.from("2026-11-10"),
+                end: Temporal.PlainDate.from("2026-11-17"),
+                dependsOn: [501, 409],
             }
         ],
     },

@@ -1,10 +1,12 @@
 * { box-sizing: border-box; }
 
-/* QuadratoHeader (sg-components) is sticky by default; .app is a padded,
-   rounded card rather than a full-bleed page, so a stuck header would
-   detach from the card and float over the rest of the app on scroll. */
-.app > .header {
+/* QuadratoHeader (sg-components) is sticky by default and only spans
+   #root's max-width; keep it static and stretch it to the full viewport
+   width since it now sits above the .app card, not inside it. */
+#root > .header {
   position: static;
+  width: 100vw;
+  margin-left: calc(50% - 50vw);
 }
 
 .app {
