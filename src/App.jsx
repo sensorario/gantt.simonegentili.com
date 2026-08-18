@@ -114,6 +114,7 @@ function App() {
   const [projects, setProjects] = useState(initialProjects)
   const [selectedProjectId, setSelectedProjectId] = useState(null) // null = tutti
   const [visibleDays, setVisibleDays] = useState(180)
+  const [hidePastTasks, setHidePastTasks] = useState(false)
   const [arrows, setArrows] = useState([])
   const [todayLine, setTodayLine] = useState(null)
   const columns = getColumns(offset, visibleDays)
@@ -131,6 +132,8 @@ function App() {
   const visibleProjects = selectedProjectId === null
     ? projects
     : projects.filter(p => p.id === selectedProjectId)
+
+  const isPastTask = (task) => Temporal.PlainDate.compare(task.end, today) < 0
 
   // tasks flat per i vincoli (solo quelli visibili)
   const flatTasks = visibleProjects.flatMap(p => p.tasks)
@@ -355,6 +358,11 @@ function App() {
               onClick={() => setSelectedProjectId(p.id)}
             >{p.name}</button>
           ))}
+          <button
+            className={`btn${hidePastTasks ? ' active' : ''}`}
+            style={{ marginLeft: '12px' }}
+            onClick={() => setHidePastTasks(h => !h)}
+          >Nascondi passati</button>
         </div>
         <div className="gantt-card">
           <div ref={containerRef} style={{ position: 'relative' }}>
@@ -395,14 +403,18 @@ function App() {
                 </tr>
               </thead>
               <tbody>
-                {visibleProjects.map(project => (
+                {visibleProjects.map(project => {
+                  const tasks = hidePastTasks ? project.tasks.filter(t => !isPastTask(t)) : project.tasks
+                  if (tasks.length === 0) return null
+
+                  return (
                   <>
                     <tr key={`proj-${project.id}`} className="project-header-row">
                       <td className="project-header-cell" colSpan={visibleDays + 1}>
                         {project.name}
                       </td>
                     </tr>
-                    {project.tasks.map((task) => {
+                    {tasks.map((task) => {
                       const firstActive = columns.findIndex(({ date }) => isBetween(date, task.start, task.end))
                       const lastActive = columns.findLastIndex(({ date }) => isBetween(date, task.start, task.end))
 
@@ -447,7 +459,8 @@ function App() {
                       )
                     })}
                   </>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>
