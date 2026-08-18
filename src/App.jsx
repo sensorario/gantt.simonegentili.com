@@ -110,7 +110,7 @@ function App() {
     setUsername(null)
   }
 
-  const [offset, setOffset] = useState(0)
+  const [offset, setOffset] = useState(-21)
   const [projects, setProjects] = useState(initialProjects)
   const [selectedProjectId, setSelectedProjectId] = useState(null) // null = tutti
   const [visibleDays, setVisibleDays] = useState(180)
