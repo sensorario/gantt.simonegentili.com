@@ -19,7 +19,11 @@ La conversione sta in `src/App.jsx`, in `toProjects` e `toGanttTask`.
 | fine | la scadenza del task (`timestamp`) |
 | inizio | l'inizio pianificato (`startsAt`, salvato dal Gantt); se manca il giorno di creazione (`createdAt`); se manca anche quello oggi; mai dopo la fine |
 
-I task **senza scadenza** e senza inizio pianificato sono barre di un giorno, tutte nella stessa colonna, `UNSCHEDULED_WEEKS` (3) settimane dopo oggi, tratteggiate. I task **in corso** sono arancioni.
+I task **senza scadenza** e senza inizio pianificato sono barre di un giorno, tutte nella stessa colonna, `UNSCHEDULED_WEEKS` (3) settimane dopo oggi, tratteggiate. Ogni barra ha il colore del suo progetto; i task **in corso** hanno in più un bordo scuro dello stesso colore.
+
+### Colori dei progetti
+
+Il colore è quello del progetto in quadrato, salvato sulla riga del progetto (`projects.color`, workspace corrente): si cambia da entrambe le app e si vede in tutte e due. Nel Gantt si cambia dal quadratino accanto al bottone del progetto, in alto (pastelli o colore personalizzato; viene salvato con `PATCH /gantt/project-color` dopo un attimo, così il selettore personalizzato non manda una richiesta a ogni movimento). Un progetto che non ha ancora un colore, né sulla riga né nella vecchia configurazione di quadrato (`simplanner-project-colors`, che vale ancora per i colori scelti prima), riceve un pastello a caso, lontano dai colori degli altri progetti, salvato subito: da lì in poi è il suo colore anche in quadrato. I task senza progetto sono grigi.
 
 ### Padre e sotto-task
 

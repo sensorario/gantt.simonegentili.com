@@ -1,6 +1,6 @@
 import { Fragment, useState, useEffect, useLayoutEffect, useRef } from 'react'
 import './App.css'
-import { SGFooter, QuadratoHeader } from '@sensorario/sg-components'
+import { ColorPicker, SGFooter, QuadratoHeader } from '@sensorario/sg-components'
 import { Temporal } from '@js-temporal/polyfill'
 
 const today = Temporal.Now.plainDateISO()
@@ -10,6 +10,11 @@ const today = Temporal.Now.plainDateISO()
 const QUADRATO_API = 'https://api.simonegentili.com/quadrato'
 const GANTT_API = 'https://api.simonegentili.com/gantt'
 const QUADRATO_TASK_URL = 'https://quadrato.simonegentili.com/task/'
+const NO_PROJECT_ID = '__no-project__'
+// Tasks with no project have no color of their own.
+const NO_PROJECT_COLOR = '#cbd5e1'
+// Offered by the color picker; a project with no color yet gets a random pastel.
+const PASTELS = ['#fecaca', '#fed7aa', '#fde68a', '#d9f99d', '#bbf7d0', '#a7f3d0', '#a5f3fc', '#bae6fd', '#c7d2fe', '#ddd6fe', '#f5d0fe', '#fbcfe8']
 const STATUS_TODO = 0
 const STATUS_IN_PROGRESS = 1
 // Tasks with no due date are all parked in the same column, this far from today.
@@ -23,6 +28,68 @@ const MIN_NAME_WIDTH = 120
 const MAX_NAME_WIDTH = 600
 
 const clampNameWidth = (width) => Math.min(MAX_NAME_WIDTH, Math.max(MIN_NAME_WIDTH, width))
+
+// The project colors quadrato and the Gantt share: saved on the project row (SetProjectColor
+// in the API), else the one quadrato used to keep in its config.
+function sharedColors(data) {
+  const config = data['simplanner-project-colors']
+  const saved = (data['simplanner-projects'] ?? []).filter(p => p.color).map(p => [p.name, p.color])
+  return { ...(config && typeof config === 'object' ? config : {}), ...Object.fromEntries(saved) }
+}
+
+const hexToRgb = (hex) => /^#[0-9a-f]{6}$/i.test(hex) ? [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16)) : null
+
+function hueOf(hex) {
+  const rgb = hexToRgb(hex)
+  if (!rgb) return null
+  const [r, g, b] = rgb.map(v => v / 255)
+  const max = Math.max(r, g, b)
+  const range = max - Math.min(r, g, b)
+  if (range === 0) return null
+  const sector = max === r ? ((g - b) / range) % 6 : max === g ? (b - r) / range + 2 : (r - g) / range + 4
+  return (sector * 60 + 360) % 360
+}
+
+function hslToHex(h, s, l) {
+  const a = (s / 100) * Math.min(l / 100, 1 - l / 100)
+  const channel = (n) => {
+    const k = (n + h / 30) % 12
+    return Math.round((l / 100 - a * Math.max(-1, Math.min(k - 3, 9 - k, 1))) * 255).toString(16).padStart(2, '0')
+  }
+  return `#${channel(0)}${channel(8)}${channel(4)}`
+}
+
+// A random pastel, its hue as far as a few tries get from the ones already taken.
+function randomPastel(takenHues) {
+  let hue = 0
+  let gap = -1
+  for (let i = 0; i < 24; i++) {
+    const candidate = Math.random() * 360
+    const distance = Math.min(360, ...takenHues.map(t => Math.min(Math.abs(candidate - t), 360 - Math.abs(candidate - t))))
+    if (distance > gap) {
+      hue = candidate
+      gap = distance
+    }
+  }
+  return hslToHex(hue, 70, 82)
+}
+
+// Dark text on light (pastel) bars, white on dark ones: quadrato's colors can be anything.
+function inkOn(hex) {
+  const rgb = hexToRgb(hex)
+  return rgb && 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2] < 128 ? '#ffffff' : '#1e293b'
+}
+
+// On the project's row, where quadrato reads it too.
+function saveProjectColor(name, color) {
+  return fetch(`${GANTT_API}/project-color`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getAuthCookie()}` },
+    body: JSON.stringify({ project: name, color }),
+  }).then(res => {
+    if (!res.ok) throw new Error(String(res.status))
+  })
+}
 
 // One day column: the table minus the task-name column, whatever its current width.
 const dayColumnWidth = (table, visibleDays) =>
@@ -168,7 +235,7 @@ function toProjects(tasks) {
         rows.push(row)
         visit(task.id, 1, row)
       }
-      return { id: name || '__no-project__', name: name || 'Nessun progetto', tasks: layout(rows, new Set()) }
+      return { id: name || NO_PROJECT_ID, name: name || 'Nessun progetto', tasks: layout(rows, new Set()) }
     })
 }
 
@@ -293,6 +360,9 @@ function App() {
   const [projects, setProjects] = useState(null)
   const [loadError, setLoadError] = useState(null)
   const [saveError, setSaveError] = useState(null)
+  // Project name => color, shared with quadrato.
+  const [projectColors, setProjectColors] = useState({})
+  const colorSaveTimers = useRef({})
 
   useEffect(() => {
     // The cookie is shared across *.simonegentili.com: a login in quadrato counts here too.
@@ -313,7 +383,18 @@ function App() {
       .then(json => {
         if (cancelled || !json) return
         setLoadError(null)
-        setProjects(toProjects(json['simplanner-tasks'] ?? []))
+        const loaded = toProjects(json['simplanner-tasks'] ?? [])
+        // A project with no color yet gets a random pastel, saved so that quadrato shows it too.
+        const colors = sharedColors(json)
+        const taken = loaded.map(p => hueOf(colors[p.id] ?? '')).filter(hue => hue !== null)
+        for (const { id } of loaded) {
+          if (id === NO_PROJECT_ID || colors[id]) continue
+          colors[id] = randomPastel(taken)
+          taken.push(hueOf(colors[id]))
+          saveProjectColor(id, colors[id]).catch(() => setSaveError(`Il colore del progetto ${id} non è stato salvato.`))
+        }
+        setProjectColors(colors)
+        setProjects(loaded)
       })
       .catch(() => {
         if (!cancelled) setLoadError('Impossibile caricare i task di quadrato.')
@@ -692,6 +773,17 @@ function App() {
     if (nameHeaderRef.current) setDividerX(nameHeaderRef.current.offsetWidth)
   }, [nameWidth])
 
+  const colorOf = (projectId) => (projectId !== NO_PROJECT_ID && projectColors[projectId]) || NO_PROJECT_COLOR
+
+  const changeProjectColor = (name, color) => {
+    setProjectColors(colors => ({ ...colors, [name]: color }))
+    // The custom color input fires while it's being dragged: only the last color is saved.
+    clearTimeout(colorSaveTimers.current[name])
+    colorSaveTimers.current[name] = setTimeout(() => {
+      saveProjectColor(name, color).catch(() => setSaveError(`Il colore del progetto ${name} non è stato salvato.`))
+    }, 400)
+  }
+
   const renderTaskRow = (task, projectId) => {
     const firstActive = columns.findIndex(({ date }) => isBetween(date, task.start, task.end))
     const lastActive = columns.findLastIndex(({ date }) => isBetween(date, task.start, task.end))
@@ -731,6 +823,7 @@ function App() {
             <td colSpan={lastActive - firstActive + 1} className="cell-bar">
               <div
                 className={`bar${task.inProgress ? ' bar--doing' : ''}${task.unscheduled ? ' bar--unscheduled' : ''}${selected ? ' bar--selected' : ''}`}
+                style={{ '--project-color': colorOf(projectId), '--project-ink': inkOn(colorOf(projectId)) }}
                 title={task.unscheduled ? 'Senza scadenza: trascinala per pianificarla' : undefined}
                 ref={el => barRefs.current[task.id] = el}
                 onMouseDown={(e) => handleBarMouseDown(e, task, projectId)}
@@ -787,11 +880,17 @@ function App() {
             onClick={() => setSelectedProjectId(null)}
           >Tutti</button>
           {loadedProjects.map(p => (
-            <button
-              key={p.id}
-              className={`btn${selectedProjectId === p.id ? ' active' : ''}`}
-              onClick={() => setSelectedProjectId(p.id)}
-            >{p.name}</button>
+            <span key={p.id} className="project-filter">
+              {p.id !== NO_PROJECT_ID && (
+                <span title={`Colore di ${p.name}`}>
+                  <ColorPicker value={colorOf(p.id)} swatches={PASTELS} onChange={color => changeProjectColor(p.id, color)} />
+                </span>
+              )}
+              <button
+                className={`btn${selectedProjectId === p.id ? ' active' : ''}`}
+                onClick={() => setSelectedProjectId(p.id)}
+              >{p.name}</button>
+            </span>
           ))}
           <button
             className={`btn${hidePastTasks ? ' active' : ''}`}
@@ -884,6 +983,7 @@ function App() {
                       <Fragment key={project.id}>
                         <tr className="project-header-row">
                           <td className="project-header-cell" colSpan={visibleDays + 1}>
+                            <span className="project-dot" style={{ background: colorOf(project.id) }} />
                             {project.name}
                           </td>
                         </tr>

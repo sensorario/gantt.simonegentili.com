@@ -207,9 +207,10 @@
 .bar {
   height: 24px;
   border-radius: 6px;
-  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  /* Il colore del progetto, condiviso con quadrato */
+  background: var(--project-color, #cbd5e1);
   cursor: grab;
-  box-shadow: 0 1px 3px rgba(59,130,246,0.4);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.2);
   transition: filter 0.15s;
   position: relative;
   display: flex;
@@ -244,13 +245,12 @@
 }
 
 .bar:hover .bar-handle {
-  background: rgba(255, 255, 255, 0.35);
+  background: rgba(15, 23, 42, 0.15);
 }
 
-/* In corso in quadrato */
+/* In corso in quadrato: bordo scuro dello stesso colore */
 .bar--doing {
-  background: linear-gradient(135deg, #f59e0b, #d97706);
-  box-shadow: 0 1px 3px rgba(245,158,11,0.4);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--project-color) 50%, #000);
 }
 
 /* Rettangolo di selezione: le barre che tocca vengono selezionate */
@@ -270,9 +270,9 @@
 
 /* Senza scadenza: parcheggiata qualche settimana più avanti finché non la si trascina */
 .bar--unscheduled {
-  background: repeating-linear-gradient(135deg, #cbd5e1, #cbd5e1 4px, #e2e8f0 4px, #e2e8f0 8px);
+  background: repeating-linear-gradient(135deg, var(--project-color) 0 4px, color-mix(in srgb, var(--project-color) 35%, #fff) 4px 8px);
   box-shadow: none;
-  border: 1px dashed #94a3b8;
+  border: 1px dashed color-mix(in srgb, var(--project-color) 55%, #000);
 }
 
 .gantt-message {
@@ -288,7 +288,7 @@
 .bar-date {
   font-size: 10px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.95);
+  color: var(--project-ink, #1e293b);
   white-space: nowrap;
   opacity: 0;
   transition: opacity 0.15s;
@@ -323,6 +323,39 @@
   color: #ef4444;
   font-weight: 700;
   border-bottom: 2px solid #ef4444;
+}
+
+.project-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: -1px;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.15);
+}
+
+/* Bottone del progetto con, accanto, il suo colore (si cambia da qui, anche per quadrato) */
+.project-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.project-filter .sg-color-picker-toggle {
+  width: auto;
+  padding: 5px;
+  background: #ffffff;
+  border-color: #e2e8f0;
+}
+
+.project-filter .sg-color-picker-toggle-label {
+  display: none;
+}
+
+.project-filter .sg-color-picker-swatch {
+  width: 14px;
+  height: 14px;
 }
 
 .project-header-row {
