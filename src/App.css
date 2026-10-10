@@ -101,7 +101,31 @@
 .gantt-table th.col-name {
   text-align: left;
   padding-left: 12px;
-  width: 220px;
+}
+
+.name-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 9px;
+  margin-left: -5px;
+  cursor: col-resize;
+  z-index: 2;
+}
+
+.name-divider::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 1px;
+}
+
+.name-divider:hover::after {
+  left: 3px;
+  width: 3px;
+  background: #5480e6;
 }
 
 .gantt-table td {

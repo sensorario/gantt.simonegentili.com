@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef } from 'react'
+import { Fragment, useState, useEffect, useLayoutEffect, useRef } from 'react'
 import './App.css'
 import { SGFooter, QuadratoHeader } from '@sensorario/sg-components'
 import { Temporal } from '@js-temporal/polyfill'
@@ -13,6 +13,17 @@ const STATUS_IN_PROGRESS = 1
 const UNSCHEDULED_WEEKS = 3
 // Due time given to a task scheduled for the first time by dragging it.
 const DEFAULT_DUE_TIME = '09:00:00'
+// The task-name column is resized by dragging its divider; the width is remembered per browser.
+const NAME_WIDTH_KEY = 'gantt-name-width'
+const DEFAULT_NAME_WIDTH = 220
+const MIN_NAME_WIDTH = 120
+const MAX_NAME_WIDTH = 600
+
+const clampNameWidth = (width) => Math.min(MAX_NAME_WIDTH, Math.max(MIN_NAME_WIDTH, width))
+
+// One day column: the table minus the task-name column, whatever its current width.
+const dayColumnWidth = (table, visibleDays) =>
+  (table.offsetWidth - table.querySelector('th.col-name').offsetWidth) / visibleDays
 
 // Cookie condiviso su .simonegentili.com: un utente già autenticato su un
 // altro prodotto della famiglia (es. quadrato) risulta loggato anche qui.
@@ -262,8 +273,8 @@ function App() {
     setProjects(null)
   }
 
-  // A week back: with the 30-day default, today and the unscheduled tasks (UNSCHEDULED_WEEKS ahead) stay in view.
-  const [offset, setOffset] = useState(-7)
+  // A few days back: with the 14-day default most of the view is what's coming.
+  const [offset, setOffset] = useState(-3)
   // null until quadrato's tasks arrive (or while logged out)
   const [projects, setProjects] = useState(null)
   const [loadError, setLoadError] = useState(null)
@@ -296,8 +307,15 @@ function App() {
     return () => { cancelled = true }
   }, [username])
   const [selectedProjectId, setSelectedProjectId] = useState(null) // null = tutti
-  const [visibleDays, setVisibleDays] = useState(30)
+  const [visibleDays, setVisibleDays] = useState(14)
   const [hidePastTasks, setHidePastTasks] = useState(false)
+  // Off: one list of every task, ordered by start date.
+  const [groupByProject, setGroupByProject] = useState(true)
+  const [nameWidth, setNameWidth] = useState(() => {
+    const saved = Number(localStorage.getItem(NAME_WIDTH_KEY))
+    return saved ? clampNameWidth(saved) : DEFAULT_NAME_WIDTH
+  })
+  const [dividerX, setDividerX] = useState(null)
   const [arrows, setArrows] = useState([])
   const [todayLine, setTodayLine] = useState(null)
   const columns = getColumns(offset, visibleDays)
@@ -310,6 +328,8 @@ function App() {
   const barRefs = useRef({})
   const rowRefs = useRef({})
   const containerRef = useRef(null)
+  const nameHeaderRef = useRef(null)
+  const resizeRef = useRef(null)
 
   // Righe visibili: task raggruppati per progetto con header progetto
   const loadedProjects = projects ?? []
@@ -318,6 +338,7 @@ function App() {
     : loadedProjects.filter(p => p.id === selectedProjectId)
 
   const isPastTask = (task) => Temporal.PlainDate.compare(task.end, today) < 0
+  const shownTasks = (project) => hidePastTasks ? project.tasks.filter(t => !isPastTask(t)) : project.tasks
 
   // tasks flat per i vincoli (solo quelli visibili)
   const flatTasks = visibleProjects.flatMap(p => p.tasks)
@@ -360,6 +381,29 @@ function App() {
       )))
     }
   }
+
+  useEffect(() => {
+    const handleResizeMove = (e) => {
+      if (!resizeRef.current) return
+      const { startX, startWidth } = resizeRef.current
+      setNameWidth(clampNameWidth(startWidth + e.clientX - startX))
+    }
+    const handleResizeUp = () => {
+      if (!resizeRef.current) return
+      resizeRef.current = null
+      document.body.style.cursor = ''
+    }
+    window.addEventListener('mousemove', handleResizeMove)
+    window.addEventListener('mouseup', handleResizeUp)
+    return () => {
+      window.removeEventListener('mousemove', handleResizeMove)
+      window.removeEventListener('mouseup', handleResizeUp)
+    }
+  }, [])
+
+  useEffect(() => {
+    localStorage.setItem(NAME_WIDTH_KEY, String(nameWidth))
+  }, [nameWidth])
 
   useEffect(() => {
     const handleKey = (e) => {
@@ -517,7 +561,7 @@ function App() {
   // mode: 'move' (the bar), 'start' or 'end' (one of its edges)
   const handleBarMouseDown = (e, task, projectId, mode = 'move') => {
     e.stopPropagation()
-    const colWidth = e.currentTarget.closest('table').offsetWidth / (visibleDays + 1)
+    const colWidth = dayColumnWidth(e.currentTarget.closest('table'), visibleDays)
     dragRef.current = {
       taskId: task.id,
       projectId,
@@ -556,6 +600,7 @@ function App() {
     setArrows(prev => JSON.stringify(prev) === JSON.stringify(newArrows) ? prev : newArrows)
   }, [flatTasks])
 
+  // The rows set the line's height, so it's recomputed when they arrive or change.
   useLayoutEffect(() => {
     if (!containerRef.current || todayIndex === -1 || !todayColRef.current) {
       setTodayLine(null)
@@ -567,7 +612,79 @@ function App() {
       x: colRect.left - containerRect.left + colRect.width / 2,
       height: containerRect.height,
     })
-  }, [offset, visibleDays, todayIndex])
+  }, [offset, visibleDays, todayIndex, nameWidth, projects, selectedProjectId, hidePastTasks, groupByProject])
+
+  // The divider sits on the name column's right edge, wherever the table puts it.
+  useLayoutEffect(() => {
+    if (nameHeaderRef.current) setDividerX(nameHeaderRef.current.offsetWidth)
+  }, [nameWidth])
+
+  const renderTaskRow = (task, projectId) => {
+    const firstActive = columns.findIndex(({ date }) => isBetween(date, task.start, task.end))
+    const lastActive = columns.findLastIndex(({ date }) => isBetween(date, task.start, task.end))
+
+    return (
+      <tr
+        key={task.id}
+        ref={el => rowRefs.current[task.id] = el}
+        className={dragOverId === task.id ? 'drop-target' : ''}
+      >
+        <td className="cell-name">
+          <div className="cell-name-inner">
+            {/* Rows are reordered, and indented under their parent, only within a project. */}
+            {groupByProject && (
+              <span
+                className="drag-handle"
+                onMouseDown={() => { rowDragRef.current = { taskId: task.id, projectId } }}
+              >⠿</span>
+            )}
+            <span style={{ paddingLeft: groupByProject ? task.depth * 16 : 0 }}>{task.name}</span>
+            <a
+              className="open-in-quadrato"
+              href={`${QUADRATO_TASK_URL}${task.id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Apri il task in quadrato"
+              aria-label={`Apri ${task.name} in quadrato`}
+            >↗</a>
+          </div>
+        </td>
+        {firstActive === -1 ? (
+          <td colSpan={visibleDays}></td>
+        ) : (
+          <>
+            {firstActive > 0 && <td colSpan={firstActive}></td>}
+            <td colSpan={lastActive - firstActive + 1} className="cell-bar">
+              <div
+                className={`bar${task.inProgress ? ' bar--doing' : ''}${task.unscheduled ? ' bar--unscheduled' : ''}`}
+                title={task.unscheduled ? 'Senza scadenza: trascinala per pianificarla' : undefined}
+                ref={el => barRefs.current[task.id] = el}
+                onMouseDown={(e) => handleBarMouseDown(e, task, projectId)}
+              >
+                <span
+                  className="bar-handle bar-handle--start"
+                  title="Trascina per spostare la data di inizio"
+                  onMouseDown={(e) => handleBarMouseDown(e, task, projectId, 'start')}
+                />
+                <span
+                  className="bar-handle bar-handle--end"
+                  title="Trascina per spostare la data di fine"
+                  onMouseDown={(e) => handleBarMouseDown(e, task, projectId, 'end')}
+                />
+                <span className="bar-date bar-date-start">
+                  {task.start.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                </span>
+                <span className="bar-date bar-date-end">
+                  {task.end.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                </span>
+              </div>
+            </td>
+            {lastActive < visibleDays - 1 && <td colSpan={visibleDays - 1 - lastActive}></td>}
+          </>
+        )}
+      </tr>
+    )
+  }
 
   return (
 
@@ -583,7 +700,7 @@ function App() {
           <button className="btn" onClick={() => setOffset(o => o - 1)}>&#8592;</button>
           <button className="btn" onClick={() => setOffset(o => o + 1)}>&#8594;</button>
           <span className="subtitle">Giorni:</span>
-          {[30, 90, 180, 365].map(d => (
+          {[14, 30, 90, 180, 365].map(d => (
             <button
               key={d}
               className={`btn${visibleDays === d ? ' active' : ''}`}
@@ -607,6 +724,10 @@ function App() {
             style={{ marginLeft: '12px' }}
             onClick={() => setHidePastTasks(h => !h)}
           >Nascondi passati</button>
+          <button
+            className={`btn${groupByProject ? ' active' : ''}`}
+            onClick={() => setGroupByProject(g => !g)}
+          >Raggruppa per progetto</button>
         </div>
         {!getAuthCookie() && <p className="gantt-message">Accedi per vedere i task di quadrato.</p>}
         {getAuthCookie() && projects === null && !loadError && <p className="gantt-message">Caricamento dei task di quadrato…</p>}
@@ -638,17 +759,29 @@ function App() {
                 />
               ))}
             </svg>
+            {dividerX !== null && (
+              <div
+                className="name-divider"
+                style={{ left: dividerX }}
+                title="Trascina per ridimensionare"
+                onMouseDown={(e) => {
+                  resizeRef.current = { startX: e.clientX, startWidth: nameWidth }
+                  document.body.style.cursor = 'col-resize'
+                  e.preventDefault()
+                }}
+              />
+            )}
             <table className="gantt-table">
               <thead
                 onMouseDown={(e) => {
-                  const colWidth = e.currentTarget.closest('table').offsetWidth / (visibleDays + 1)
+                  const colWidth = dayColumnWidth(e.currentTarget.closest('table'), visibleDays)
                   timelineDragRef.current = { startX: e.clientX, startOffset: offset, colWidth }
                   e.preventDefault()
                 }}
                 style={{ cursor: 'ew-resize', userSelect: 'none' }}
               >
                 <tr>
-                  <th className="col-name">Task</th>
+                  <th className="col-name" ref={nameHeaderRef} style={{ width: nameWidth }}>Task</th>
                   {columns.map(({ label, isToday }) => (
                     <th
                       key={label}
@@ -659,83 +792,28 @@ function App() {
                 </tr>
               </thead>
               <tbody>
-                {visibleProjects.map(project => {
-                  const tasks = hidePastTasks ? project.tasks.filter(t => !isPastTask(t)) : project.tasks
-                  if (tasks.length === 0) return null
+                {groupByProject
+                  ? visibleProjects.map(project => {
+                    const tasks = shownTasks(project)
+                    if (tasks.length === 0) return null
 
-                  return (
-                  <>
-                    <tr key={`proj-${project.id}`} className="project-header-row">
-                      <td className="project-header-cell" colSpan={visibleDays + 1}>
-                        {project.name}
-                      </td>
-                    </tr>
-                    {tasks.map((task) => {
-                      const firstActive = columns.findIndex(({ date }) => isBetween(date, task.start, task.end))
-                      const lastActive = columns.findLastIndex(({ date }) => isBetween(date, task.start, task.end))
-
-                      return (
-                        <tr
-                          key={task.id}
-                          ref={el => rowRefs.current[task.id] = el}
-                          className={dragOverId === task.id ? 'drop-target' : ''}
-                        >
-                          <td className="cell-name">
-                            <div className="cell-name-inner">
-                              <span
-                                className="drag-handle"
-                                onMouseDown={() => { rowDragRef.current = { taskId: task.id, projectId: project.id } }}
-                              >⠿</span>
-                              <span style={{ paddingLeft: task.depth * 16 }}>{task.name}</span>
-                              <a
-                                className="open-in-quadrato"
-                                href={`${QUADRATO_TASK_URL}${task.id}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title="Apri il task in quadrato"
-                                aria-label={`Apri ${task.name} in quadrato`}
-                              >↗</a>
-                            </div>
+                    return (
+                      <Fragment key={project.id}>
+                        <tr className="project-header-row">
+                          <td className="project-header-cell" colSpan={visibleDays + 1}>
+                            {project.name}
                           </td>
-                          {firstActive === -1 ? (
-                            <td colSpan={visibleDays}></td>
-                          ) : (
-                            <>
-                              {firstActive > 0 && <td colSpan={firstActive}></td>}
-                              <td colSpan={lastActive - firstActive + 1} className="cell-bar">
-                                <div
-                                  className={`bar${task.inProgress ? ' bar--doing' : ''}${task.unscheduled ? ' bar--unscheduled' : ''}`}
-                                  title={task.unscheduled ? 'Senza scadenza: trascinala per pianificarla' : undefined}
-                                  ref={el => barRefs.current[task.id] = el}
-                                  onMouseDown={(e) => handleBarMouseDown(e, task, project.id)}
-                                >
-                                  <span
-                                    className="bar-handle bar-handle--start"
-                                    title="Trascina per spostare la data di inizio"
-                                    onMouseDown={(e) => handleBarMouseDown(e, task, project.id, 'start')}
-                                  />
-                                  <span
-                                    className="bar-handle bar-handle--end"
-                                    title="Trascina per spostare la data di fine"
-                                    onMouseDown={(e) => handleBarMouseDown(e, task, project.id, 'end')}
-                                  />
-                                  <span className="bar-date bar-date-start">
-                                    {task.start.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })}
-                                  </span>
-                                  <span className="bar-date bar-date-end">
-                                    {task.end.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })}
-                                  </span>
-                                </div>
-                              </td>
-                              {lastActive < visibleDays - 1 && <td colSpan={visibleDays - 1 - lastActive}></td>}
-                            </>
-                          )}
                         </tr>
-                      )
-                    })}
-                  </>
-                  )
-                })}
+                        {tasks.map(task => renderTaskRow(task, project.id))}
+                      </Fragment>
+                    )
+                  })
+                  : visibleProjects
+                    .flatMap(project => shownTasks(project).map(task => ({ task, projectId: project.id })))
+                    .sort((a, b) =>
+                      Temporal.PlainDate.compare(a.task.start, b.task.start) ||
+                      Temporal.PlainDate.compare(a.task.end, b.task.end))
+                    .map(({ task, projectId }) => renderTaskRow(task, projectId))}
               </tbody>
             </table>
           </div>

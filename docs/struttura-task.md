@@ -9,7 +9,7 @@ La conversione sta in `src/App.jsx`, in `toProjects` e `toGanttTask`.
 ### Quali task
 
 - Solo quelli **da fare** (`status` 0) e **in corso** (`status` 1), non archiviati: cosa si sta facendo e cosa si dovrà fare.
-- Raggruppati per `project`; quelli senza progetto finiscono in "Nessun progetto".
+- Raggruppati per `project`; quelli senza progetto finiscono in "Nessun progetto". Con "Raggruppa per progetto" spento diventano un'unica lista ordinata per data di inizio (a parità, per data di fine), senza rientri né maniglia ⠿.
 - I sotto-task (`parentId`) stanno subito sotto il padre, rientrati di un livello. Un sotto-task il cui padre non è mostrato (chiuso, archiviato, in un altro progetto) parte come primo livello.
 
 ### Le date di una barra
@@ -28,6 +28,11 @@ I task **senza scadenza** e senza inizio pianificato sono barre di un giorno, tu
 - **Tra fratelli non c'è nessun legame.**
 - Un task senza scadenza (parcheggiato qualche settimana avanti) è su una data finta: non dipende da nessuno, nessuno dipende da lui, non allunga nessuno. Un task di primo livello senza scadenza prende la fine dei sotto-task.
 - Le regole si applicano insieme finché niente si sposta più (`layout`). Al caricamento il Gantt mostra già il risultato, ma niente viene salvato finché non si trascina qualcosa; trascinando un task, ogni altro task che si sposta di conseguenza (un sotto-task spinto dopo, il task di primo livello allungato) viene salvato insieme a lui.
+
+## La vista
+
+- All'apertura mostra 14 giorni, a partire da 3 giorni fa; i bottoni "Giorni" la allargano fino a un anno. I task senza scadenza (`UNSCHEDULED_WEEKS` settimane avanti) restano fuori finché non si allarga o si scorre la vista.
+- La linea verticale tra i nomi dei task e le barre si trascina per allargare o stringere la colonna dei nomi (tra 120 e 600 px). La larghezza resta salvata nel browser (`localStorage`, chiave `gantt-name-width`).
 
 ## Aprire un task in quadrato
 
