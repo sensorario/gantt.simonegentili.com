@@ -342,8 +342,10 @@ function App() {
   // Ids of the rows on screen, in their order, while a bar is dragged: the rows stay put
   // under the mouse and are re-sorted (and re-filtered) only once it's released.
   const [frozenRows, setFrozenRows] = useState(null)
-  // Ticked in the name column: dragging one of their bars moves them all.
+  // Picked by dragging a rectangle over the bars: dragging one of them moves them all.
   const [selectedIds, setSelectedIds] = useState([])
+  // The selection rectangle being drawn, relative to the chart container.
+  const [marquee, setMarquee] = useState(null)
   const barRefs = useRef({})
   const rowRefs = useRef({})
   const containerRef = useRef(null)
@@ -582,6 +584,49 @@ function App() {
     }
   }, [dragOverId])
 
+  // Dragging from an empty spot of the rows draws a rectangle: the bars it touches become the
+  // selection. It starts after a few pixels, so a plain click on an empty spot clears it instead.
+  const startMarquee = (e) => {
+    if (e.button !== 0 || e.target.closest('.bar, .drag-handle, a, button')) return
+    e.preventDefault()
+    const startX = e.clientX
+    const startY = e.clientY
+    const rows = flatRows
+    let active = false
+
+    const onMove = (ev) => {
+      if (!active && Math.hypot(ev.clientX - startX, ev.clientY - startY) < 5) return
+      active = true
+      const area = {
+        left: Math.min(startX, ev.clientX),
+        top: Math.min(startY, ev.clientY),
+        right: Math.max(startX, ev.clientX),
+        bottom: Math.max(startY, ev.clientY),
+      }
+      const container = containerRef.current.getBoundingClientRect()
+      setMarquee({
+        left: area.left - container.left,
+        top: area.top - container.top,
+        width: area.right - area.left,
+        height: area.bottom - area.top,
+      })
+      setSelectedIds(rows
+        .filter(({ task }) => {
+          const bar = barRefs.current[task.id]?.getBoundingClientRect()
+          return bar && bar.left <= area.right && bar.right >= area.left && bar.top <= area.bottom && bar.bottom >= area.top
+        })
+        .map(({ task }) => task.id))
+    }
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      if (!active) setSelectedIds([])
+      setMarquee(null)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
   // mode: 'move' (the bar), 'start' or 'end' (one of its edges). Moving a selected bar
   // moves every selected one on screen; an edge, or a bar outside the selection, only itself.
   const handleBarMouseDown = (e, task, projectId, mode = 'move') => {
@@ -660,14 +705,6 @@ function App() {
       >
         <td className="cell-name">
           <div className="cell-name-inner">
-            <input
-              type="checkbox"
-              className="row-select"
-              checked={selected}
-              onChange={() => setSelectedIds(ids => selected ? ids.filter(id => id !== task.id) : [...ids, task.id])}
-              title="Seleziona: trascinando una barra selezionata si spostano tutte"
-              aria-label={`Seleziona ${task.name}`}
-            />
             {/* Rows are reordered, and indented under their parent, only within a project. */}
             {groupByProject && (
               <span
@@ -804,6 +841,7 @@ function App() {
                 />
               ))}
             </svg>
+            {marquee && <div className="marquee" style={marquee} />}
             {dividerX !== null && (
               <div
                 className="name-divider"
@@ -836,7 +874,7 @@ function App() {
                   ))}
                 </tr>
               </thead>
-              <tbody>
+              <tbody onMouseDown={startMarquee}>
                 {groupByProject
                   ? visibleProjects.map(project => {
                     const tasks = shownTasks(project)

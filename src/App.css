@@ -168,13 +168,6 @@
   gap: 6px;
 }
 
-.row-select {
-  margin: 0;
-  flex-shrink: 0;
-  cursor: pointer;
-  accent-color: #5480e6;
-}
-
 .drag-handle {
   cursor: grab;
   color: #cbd5e1;
@@ -258,6 +251,15 @@
 .bar--doing {
   background: linear-gradient(135deg, #f59e0b, #d97706);
   box-shadow: 0 1px 3px rgba(245,158,11,0.4);
+}
+
+/* Rettangolo di selezione: le barre che tocca vengono selezionate */
+.marquee {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+  border: 1px dashed #5480e6;
+  background: rgba(84, 128, 230, 0.1);
 }
 
 /* Selezionata: trascinandola si spostano tutte le selezionate */
