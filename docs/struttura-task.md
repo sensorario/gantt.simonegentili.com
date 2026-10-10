@@ -48,6 +48,12 @@ Accanto al nome di ogni task c'è un bottone ↗ che apre il task in quadrato (`
 
 Il salvataggio è `PUT /gantt/task/:id` (accetta solo `timestamp` e `startsAt`, poi aggiorna il task come farebbe quadrato e registra l'evento `TaskRescheduled` con `app: gantt`, che conta per l'ordine delle app nel launcher; anche il login dal Gantt passa da `POST /gantt/authenticate`): `timestamp` in millisecondi, mantenendo l'orario che la scadenza aveva (le 09:00 se non ne aveva); `startsAt` in secondi Unix, mezzanotte del giorno scelto. Se il salvataggio non riesce la barra torna dov'era.
 
+### Più task insieme
+
+La casella accanto al nome seleziona il task (la riga si colora e la barra ha un bordo; nella barra in alto compare "N selezionate" con "Deseleziona", che equivale a Esc). Trascinando il **centro** di una barra selezionata si spostano dello stesso numero di giorni tutte le selezionate visibili, anche di progetti diversi; quelle nascoste da un filtro restano dove sono. I **bordi** di una barra selezionata, e qualunque barra non selezionata, spostano solo il proprio task. Le regole tra padre e sotto-task valgono come sempre, con le selezionate che restano dove le si lascia: un sotto-task selezionato insieme al suo task si sposta con lui senza essere spinto oltre, uno non selezionato viene spinto dopo. Ogni task che cambia viene salvato.
+
+Mentre si trascina, le righe restano ferme: stesso ordine e stesse righe, anche se la barra finisce oltre un'altra o nel passato con "Nascondi passati" attivo. Il riordino per data di inizio (senza raggruppamento) e il filtro si applicano al rilascio del mouse. Senza raggruppamento, trascinando una barra in verticale non si riordinano le righe.
+
 Il riordino verticale delle righe (maniglia ⠿) e le dipendenze tra task (`dependsOn`, frecce) restano funzioni del Gantt ma non vengono salvati: quadrato non ha né un ordine per il Gantt né dipendenze.
 
 ## Struttura interna di un task

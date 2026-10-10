@@ -102,12 +102,13 @@ function withParentEnds(tasks) {
 }
 
 // Subtasks after their task (resolveConstraints) and top-level tasks stretched over
-// their subtasks (withParentEnds), repeated until nothing moves.
-function layout(tasks, movedId) {
+// their subtasks (withParentEnds), repeated until nothing moves. movedIds: the bars the
+// user dragged, which stay where they were dropped.
+function layout(tasks, movedIds) {
   let current = withParentEnds(tasks)
   for (let i = 0; i <= tasks.length; i++) {
     const before = new Map(current.map(t => [t.id, t]))
-    const next = withParentEnds(resolveConstraints(current, movedId).map(t =>
+    const next = withParentEnds(resolveConstraints(current, movedIds).map(t =>
       // A task pushed after the one it depends on has a new end of its own.
       t.end.equals(before.get(t.id).end) ? t : { ...t, ownEnd: t.end }
     ))
@@ -167,7 +168,7 @@ function toProjects(tasks) {
         rows.push(row)
         visit(task.id, 1, row)
       }
-      return { id: name || '__no-project__', name: name || 'Nessun progetto', tasks: layout(rows, null) }
+      return { id: name || '__no-project__', name: name || 'Nessun progetto', tasks: layout(rows, new Set()) }
     })
 }
 
@@ -197,6 +198,16 @@ function draggedDates(mode, start, end, days) {
   return { start: start.add({ days }), end: end.add({ days }) }
 }
 
+// The tasks with the dragged bars moved `days` columns from where they were at mousedown.
+function withDragged(tasks, drag, days) {
+  return tasks.map(t => {
+    const orig = drag.moved.get(t.id)
+    if (!orig) return t
+    const dates = draggedDates(drag.mode, orig.start, orig.end, days)
+    return { ...t, ...dates, ownEnd: dates.end }
+  })
+}
+
 function isBetween(date, start, end) {
   return (
     Temporal.PlainDate.compare(date, start) >= 0 &&
@@ -204,7 +215,7 @@ function isBetween(date, start, end) {
   )
 }
 
-function resolveConstraints(tasks, movedId) {
+function resolveConstraints(tasks, movedIds) {
   const result = tasks.map(t => ({ ...t }))
   const pushedRight = new Set()
   const pushedLeft = new Set()
@@ -223,8 +234,8 @@ function resolveConstraints(tasks, movedId) {
         const overlap = Temporal.PlainDate.compare(child.start, parent.end) <= 0
         if (!overlap) continue
 
-        const isParentMoved = parent.id === movedId || pushedRight.has(parent.id)
-        const isChildMoved = child.id === movedId || pushedLeft.has(child.id)
+        const isParentMoved = movedIds.has(parent.id) || pushedRight.has(parent.id)
+        const isChildMoved = movedIds.has(child.id) || pushedLeft.has(child.id)
 
         if (isParentMoved && !isChildMoved) {
           const dur = child.start.until(child.end, { largestUnit: 'days' }).days
@@ -328,6 +339,11 @@ function App() {
   const timelineDragRef = useRef(null)
   const todayColRef = useRef(null)
   const [dragOverId, setDragOverId] = useState(null)
+  // Ids of the rows on screen, in their order, while a bar is dragged: the rows stay put
+  // under the mouse and are re-sorted (and re-filtered) only once it's released.
+  const [frozenRows, setFrozenRows] = useState(null)
+  // Ticked in the name column: dragging one of their bars moves them all.
+  const [selectedIds, setSelectedIds] = useState([])
   const barRefs = useRef({})
   const rowRefs = useRef({})
   const containerRef = useRef(null)
@@ -341,7 +357,17 @@ function App() {
     : loadedProjects.filter(p => p.id === selectedProjectId)
 
   const isPastTask = (task) => Temporal.PlainDate.compare(task.end, today) < 0
-  const shownTasks = (project) => hidePastTasks ? project.tasks.filter(t => !isPastTask(t)) : project.tasks
+  const shownTasks = (project) => frozenRows
+    ? project.tasks.filter(t => frozenRows.includes(t.id))
+    : hidePastTasks ? project.tasks.filter(t => !isPastTask(t)) : project.tasks
+  // Not grouped by project: one list by start date (ties by end).
+  const flatRows = visibleProjects
+    .flatMap(project => shownTasks(project).map(task => ({ task, projectId: project.id })))
+    .sort(frozenRows
+      ? (a, b) => frozenRows.indexOf(a.task.id) - frozenRows.indexOf(b.task.id)
+      : (a, b) => Temporal.PlainDate.compare(a.task.start, b.task.start) || Temporal.PlainDate.compare(a.task.end, b.task.end))
+  // Only the selected tasks on screen count: hidden by a filter, they neither move nor show up in the count.
+  const selectedRows = flatRows.filter(({ task }) => selectedIds.includes(task.id))
 
   // tasks flat per i vincoli (solo quelli visibili)
   const flatTasks = visibleProjects.flatMap(p => p.tasks)
@@ -412,6 +438,7 @@ function App() {
     const handleKey = (e) => {
       if (e.key === 'ArrowLeft') setOffset(o => o - 1)
       if (e.key === 'ArrowRight') setOffset(o => o + 1)
+      if (e.key === 'Escape') setSelectedIds([])
     }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
@@ -438,25 +465,22 @@ function App() {
   useEffect(() => {
     const handleMouseMove = (e) => {
       if (!dragRef.current) return
-      const { taskId, projectId, startX, colWidth } = dragRef.current
+      const drag = dragRef.current
+      const { taskId, startX, colWidth } = drag
 
       // spostamento orizzontale → cambia date
       const deltaX = e.clientX - startX
       const deltaDays = Math.round(deltaX / colWidth)
-      if (deltaDays !== dragRef.current.lastDelta) {
-        dragRef.current.lastDelta = deltaDays
-        setProjectTasks(projectId, prev => {
-          const updated = prev.map(t => {
-            if (t.id !== taskId) return t
-            const { mode, origStart, origEnd } = dragRef.current
-            const dates = draggedDates(mode, origStart, origEnd, deltaDays)
-            return { ...t, ...dates, ownEnd: dates.end }
-          })
-          return layout(updated, taskId)
-        })
+      if (deltaDays !== drag.lastDelta) {
+        drag.lastDelta = deltaDays
+        const movedIds = new Set(drag.moved.keys())
+        for (const projectId of drag.snapshots.keys()) {
+          setProjectTasks(projectId, prev => layout(withDragged(prev, drag, deltaDays), movedIds))
+        }
       }
 
-      // spostamento verticale → evidenzia riga target
+      // spostamento verticale → evidenzia riga target (solo raggruppati: altrimenti l'ordine è per data)
+      if (!dragRef.current.reorderable) return
       let overId = null
       for (const [id, el] of Object.entries(rowRefs.current)) {
         if (!el) continue
@@ -473,25 +497,22 @@ function App() {
       const drag = dragRef.current
       const { taskId, projectId } = drag
       dragRef.current = null
+      setFrozenRows(null)
       // Recomputed from the tasks as they were at mousedown, so what gets saved doesn't
       // depend on how many mousemoves the state went through.
-      const dates = draggedDates(drag.mode, drag.origStart, drag.origEnd, drag.lastDelta)
-      const before = new Map(drag.snapshot.map(t => [t.id, t]))
-      const after = layout(drag.snapshot.map(t =>
-        t.id === taskId ? { ...t, ...dates, ownEnd: dates.end } : t
-      ), taskId)
-      for (const t of after) {
-        const old = before.get(t.id)
-        const startMoved = !t.start.equals(old.start)
-        const endMoved = !t.end.equals(old.end)
-        // An edge pushed against the other one may end up exactly where it started.
-        if (!startMoved && !endMoved) continue
-        if (t.id === taskId) {
-          saveDates(drag, t)
-        } else {
-          // Moved along by the drag: a subtask pushed after it, or the top-level task stretched over it.
-          const mode = startMoved && endMoved ? 'move' : startMoved ? 'start' : 'end'
-          saveDates({ taskId: t.id, projectId, mode, origStart: old.start, origEnd: old.end, dueTime: t.dueTime }, t)
+      const movedIds = new Set(drag.moved.keys())
+      for (const [snapshotProjectId, snapshot] of drag.snapshots) {
+        const before = new Map(snapshot.map(t => [t.id, t]))
+        for (const t of layout(withDragged(snapshot, drag, drag.lastDelta), movedIds)) {
+          const old = before.get(t.id)
+          const startMoved = !t.start.equals(old.start)
+          const endMoved = !t.end.equals(old.end)
+          // An edge pushed against the other one may end up exactly where it started.
+          if (!startMoved && !endMoved) continue
+          // A dragged bar saves what the drag changed; any other task was moved along by one:
+          // a subtask pushed after it, or the top-level task stretched over it.
+          const mode = movedIds.has(t.id) ? drag.mode : startMoved && endMoved ? 'move' : startMoved ? 'start' : 'end'
+          saveDates({ taskId: t.id, projectId: snapshotProjectId, mode, origStart: old.start, origEnd: old.end, dueTime: t.dueTime }, t)
         }
       }
 
@@ -561,22 +582,26 @@ function App() {
     }
   }, [dragOverId])
 
-  // mode: 'move' (the bar), 'start' or 'end' (one of its edges)
+  // mode: 'move' (the bar), 'start' or 'end' (one of its edges). Moving a selected bar
+  // moves every selected one on screen; an edge, or a bar outside the selection, only itself.
   const handleBarMouseDown = (e, task, projectId, mode = 'move') => {
     e.stopPropagation()
     const colWidth = dayColumnWidth(e.currentTarget.closest('table'), visibleDays)
+    const group = mode === 'move' && selectedIds.includes(task.id) ? selectedRows : [{ task, projectId }]
     dragRef.current = {
       taskId: task.id,
       projectId,
       mode,
       startX: e.clientX,
       colWidth,
-      origStart: task.start,
-      origEnd: task.end,
-      dueTime: task.dueTime,
-      snapshot: loadedProjects.find(p => p.id === projectId).tasks,
+      // Where each moving bar was at mousedown, by task id.
+      moved: new Map(group.map(row => [row.task.id, { start: row.task.start, end: row.task.end }])),
+      // The tasks of every project the drag touches, as they were at mousedown.
+      snapshots: new Map(group.map(row => [row.projectId, loadedProjects.find(p => p.id === row.projectId).tasks])),
       lastDelta: 0,
+      reorderable: groupByProject && group.length === 1,
     }
+    setFrozenRows(flatRows.map(({ task }) => task.id))
     e.preventDefault()
   }
 
@@ -625,15 +650,24 @@ function App() {
   const renderTaskRow = (task, projectId) => {
     const firstActive = columns.findIndex(({ date }) => isBetween(date, task.start, task.end))
     const lastActive = columns.findLastIndex(({ date }) => isBetween(date, task.start, task.end))
+    const selected = selectedIds.includes(task.id)
 
     return (
       <tr
         key={task.id}
         ref={el => rowRefs.current[task.id] = el}
-        className={dragOverId === task.id ? 'drop-target' : ''}
+        className={[dragOverId === task.id && 'drop-target', selected && 'row-selected'].filter(Boolean).join(' ')}
       >
         <td className="cell-name">
           <div className="cell-name-inner">
+            <input
+              type="checkbox"
+              className="row-select"
+              checked={selected}
+              onChange={() => setSelectedIds(ids => selected ? ids.filter(id => id !== task.id) : [...ids, task.id])}
+              title="Seleziona: trascinando una barra selezionata si spostano tutte"
+              aria-label={`Seleziona ${task.name}`}
+            />
             {/* Rows are reordered, and indented under their parent, only within a project. */}
             {groupByProject && (
               <span
@@ -659,7 +693,7 @@ function App() {
             {firstActive > 0 && <td colSpan={firstActive}></td>}
             <td colSpan={lastActive - firstActive + 1} className="cell-bar">
               <div
-                className={`bar${task.inProgress ? ' bar--doing' : ''}${task.unscheduled ? ' bar--unscheduled' : ''}`}
+                className={`bar${task.inProgress ? ' bar--doing' : ''}${task.unscheduled ? ' bar--unscheduled' : ''}${selected ? ' bar--selected' : ''}`}
                 title={task.unscheduled ? 'Senza scadenza: trascinala per pianificarla' : undefined}
                 ref={el => barRefs.current[task.id] = el}
                 onMouseDown={(e) => handleBarMouseDown(e, task, projectId)}
@@ -731,6 +765,14 @@ function App() {
             className={`btn${groupByProject ? ' active' : ''}`}
             onClick={() => setGroupByProject(g => !g)}
           >Raggruppa per progetto</button>
+          {selectedRows.length > 0 && (
+            <>
+              <span className="subtitle" style={{ marginLeft: '12px' }}>
+                {selectedRows.length} {selectedRows.length === 1 ? 'selezionata' : 'selezionate'}
+              </span>
+              <button className="btn" onClick={() => setSelectedIds([])} title="Anche con Esc">Deseleziona</button>
+            </>
+          )}
         </div>
         {!getAuthCookie() && <p className="gantt-message">Accedi per vedere i task di quadrato.</p>}
         {getAuthCookie() && projects === null && !loadError && <p className="gantt-message">Caricamento dei task di quadrato…</p>}
@@ -811,12 +853,7 @@ function App() {
                       </Fragment>
                     )
                   })
-                  : visibleProjects
-                    .flatMap(project => shownTasks(project).map(task => ({ task, projectId: project.id })))
-                    .sort((a, b) =>
-                      Temporal.PlainDate.compare(a.task.start, b.task.start) ||
-                      Temporal.PlainDate.compare(a.task.end, b.task.end))
-                    .map(({ task, projectId }) => renderTaskRow(task, projectId))}
+                  : flatRows.map(({ task, projectId }) => renderTaskRow(task, projectId))}
               </tbody>
             </table>
           </div>

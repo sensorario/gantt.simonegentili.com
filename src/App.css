@@ -142,6 +142,10 @@
   background: #f8fafc;
 }
 
+.gantt-table tbody tr.row-selected {
+  background: #eef2ff;
+}
+
 .gantt-table tbody tr.drop-target {
   background: #fef3c7;
   outline: 2px solid #f59e0b;
@@ -162,6 +166,13 @@
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.row-select {
+  margin: 0;
+  flex-shrink: 0;
+  cursor: pointer;
+  accent-color: #5480e6;
 }
 
 .drag-handle {
@@ -247,6 +258,12 @@
 .bar--doing {
   background: linear-gradient(135deg, #f59e0b, #d97706);
   box-shadow: 0 1px 3px rgba(245,158,11,0.4);
+}
+
+/* Selezionata: trascinandola si spostano tutte le selezionate */
+.bar--selected {
+  outline: 2px solid #1e3a8a;
+  outline-offset: 2px;
 }
 
 /* Senza scadenza: parcheggiata qualche settimana più avanti finché non la si trascina */
