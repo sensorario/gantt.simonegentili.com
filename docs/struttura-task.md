@@ -21,6 +21,10 @@ La conversione sta in `src/App.jsx`, in `toProjects` e `toGanttTask`.
 
 I task **senza scadenza** e senza inizio pianificato sono barre di un giorno, tutte nella stessa colonna, `UNSCHEDULED_WEEKS` (3) settimane dopo oggi, tratteggiate. Ogni barra ha il colore del suo progetto; i task **in corso** hanno in più un bordo scuro dello stesso colore.
 
+### Ordine dei progetti
+
+Con il raggruppamento per progetto attivo, ogni intestazione di progetto ha una maniglia ⠿: trascinandola sulla sezione di un altro progetto, il progetto prende il suo posto (come il riordino delle righe). "Nessun progetto" resta sempre in fondo. L'ordine è dell'utente, per nome e uguale in tutti i suoi workspace: si salva al rilascio con `PUT /gantt/project-order` (evento `ProjectsReordered`, proiezione `project_orders`) e torna con `simplanner-project-order` di `GET /quadrato/data`. I progetti che l'ordine non conosce ancora vanno dopo, in ordine alfabetico; quelli dell'ordine che qui non ci sono (altri workspace, solo task chiusi) restano in coda, nello stesso ordine. Anche i bottoni dei progetti in alto seguono questo ordine.
+
 ### Colori dei progetti
 
 Il colore è dell'utente, legato al nome del progetto e uguale in tutti i suoi workspace: è lo stesso che mostra quadrato, e si cambia da entrambe le app. Nel Gantt si cambia dal quadratino accanto al bottone del progetto, in alto (pastelli o colore personalizzato); viene salvato con `PATCH /gantt/project-color` dopo un attimo, così il selettore personalizzato non manda una richiesta a ogni movimento. Ogni cambio è un evento `ProjectColorChanged` nello storico dell'utente; il valore attuale (la proiezione, tabella `project_colors`) arriva con `simplanner-project-colors` di `GET /quadrato/data`, sopra i colori scelti in quadrato prima di questi eventi. Un progetto senza colore riceve un pastello a caso, lontano dai colori degli altri progetti, e lo salva con `random: true`: l'API lo tiene solo se il progetto non ha ancora un colore, altrimenti risponde con quello (per esempio scelto nel frattempo in quadrato) e il Gantt usa quello. I task senza progetto sono grigi.

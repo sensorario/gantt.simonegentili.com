@@ -325,6 +325,11 @@
   border-bottom: 2px solid #ef4444;
 }
 
+.project-drag-handle {
+  margin-right: 8px;
+  vertical-align: -1px;
+}
+
 .project-dot {
   display: inline-block;
   width: 10px;

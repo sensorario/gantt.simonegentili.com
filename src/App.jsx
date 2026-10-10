@@ -91,6 +91,25 @@ function saveProjectColor(name, color, random = false) {
   }).then(saved => saved.color)
 }
 
+// The user's order (simplanner-project-order, the same in all their workspaces) first; projects
+// it doesn't know yet after them, in toProjects' order; "Nessun progetto" always last.
+function inUserOrder(projects, order) {
+  const rank = new Map((Array.isArray(order) ? order : []).map((name, index) => [name, index]))
+  const position = (project) => project.id === NO_PROJECT_ID ? Number.MAX_SAFE_INTEGER : rank.get(project.id) ?? rank.size
+  return [...projects].sort((a, b) => position(a) - position(b))
+}
+
+// Recorded by the API as a ProjectsReordered event.
+function saveProjectOrder(order) {
+  return fetch(`${GANTT_API}/project-order`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getAuthCookie()}` },
+    body: JSON.stringify({ order }),
+  }).then(res => {
+    if (!res.ok) throw new Error(String(res.status))
+  })
+}
+
 // One day column: the table minus the task-name column, whatever its current width.
 const dayColumnWidth = (table, visibleDays) =>
   (table.offsetWidth - table.querySelector('th.col-name').offsetWidth) / visibleDays
@@ -363,6 +382,8 @@ function App() {
   // Project name => color, shared with quadrato.
   const [projectColors, setProjectColors] = useState({})
   const colorSaveTimers = useRef({})
+  // The user's whole project order, also the projects not loaded here (other workspaces).
+  const [projectOrder, setProjectOrder] = useState([])
 
   useEffect(() => {
     // The cookie is shared across *.simonegentili.com: a login in quadrato counts here too.
@@ -383,7 +404,8 @@ function App() {
       .then(json => {
         if (cancelled || !json) return
         setLoadError(null)
-        const loaded = toProjects(json['simplanner-tasks'] ?? [])
+        const order = Array.isArray(json['simplanner-project-order']) ? json['simplanner-project-order'] : []
+        const loaded = inUserOrder(toProjects(json['simplanner-tasks'] ?? []), order)
         // A project with no color yet gets a random pastel, saved so that quadrato shows it too.
         const colors = sharedColors(json)
         const taken = loaded.map(p => hueOf(colors[p.id] ?? '')).filter(hue => hue !== null)
@@ -397,6 +419,7 @@ function App() {
             .catch(() => setSaveError(`Il colore del progetto ${id} non è stato salvato.`))
         }
         setProjectColors(colors)
+        setProjectOrder(order)
         setProjects(loaded)
       })
       .catch(() => {
@@ -423,6 +446,10 @@ function App() {
   const timelineDragRef = useRef(null)
   const todayColRef = useRef(null)
   const [dragOverId, setDragOverId] = useState(null)
+  // A project group dragged by the handle in its header, and the one it would land on.
+  const projectDragRef = useRef(null)
+  const projectHeaderRefs = useRef({})
+  const [projectDropId, setProjectDropId] = useState(null)
   // Ids of the rows on screen, in their order, while a bar is dragged: the rows stay put
   // under the mouse and are re-sorted (and re-filtered) only once it's released.
   const [frozenRows, setFrozenRows] = useState(null)
@@ -667,6 +694,48 @@ function App() {
       window.removeEventListener('mouseup', handleRowMouseUp)
     }
   }, [dragOverId])
+
+  useEffect(() => {
+    const handleProjectMouseMove = (e) => {
+      if (!projectDragRef.current) return
+      // The section under the mouse: the lowest project header above it.
+      let overId = null
+      let overTop = -Infinity
+      for (const [id, el] of Object.entries(projectHeaderRefs.current)) {
+        if (!el || id === NO_PROJECT_ID) continue
+        const top = el.getBoundingClientRect().top
+        if (top <= e.clientY && top > overTop) {
+          overId = id
+          overTop = top
+        }
+      }
+      setProjectDropId(overId !== projectDragRef.current ? overId : null)
+    }
+    const handleProjectMouseUp = () => {
+      const draggedId = projectDragRef.current
+      if (!draggedId) return
+      projectDragRef.current = null
+      setProjectDropId(null)
+      const named = (projects ?? []).filter(p => p.id !== NO_PROJECT_ID)
+      const from = named.findIndex(p => p.id === draggedId)
+      const to = named.findIndex(p => p.id === projectDropId)
+      if (from === -1 || to === -1) return
+      const next = [...named]
+      next.splice(to, 0, next.splice(from, 1)[0])
+      setProjects([...next, ...projects.filter(p => p.id === NO_PROJECT_ID)])
+      // Projects not loaded here (other workspaces, only closed tasks) keep their order, after these.
+      const names = next.map(p => p.id)
+      const order = [...names, ...projectOrder.filter(name => !names.includes(name))]
+      setProjectOrder(order)
+      saveProjectOrder(order).catch(() => setSaveError("L'ordine dei progetti non è stato salvato."))
+    }
+    window.addEventListener('mousemove', handleProjectMouseMove)
+    window.addEventListener('mouseup', handleProjectMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleProjectMouseMove)
+      window.removeEventListener('mouseup', handleProjectMouseUp)
+    }
+  }, [projectDropId, projects, projectOrder])
 
   // Dragging from an empty spot of the rows draws a rectangle: the bars it touches become the
   // selection. It starts after a few pixels, so a plain click on an empty spot clears it instead.
@@ -984,8 +1053,21 @@ function App() {
 
                     return (
                       <Fragment key={project.id}>
-                        <tr className="project-header-row">
+                        <tr
+                          className={`project-header-row${projectDropId === project.id ? ' drop-target' : ''}`}
+                          ref={el => projectHeaderRefs.current[project.id] = el}
+                        >
                           <td className="project-header-cell" colSpan={visibleDays + 1}>
+                            {project.id !== NO_PROJECT_ID && (
+                              <span
+                                className="drag-handle project-drag-handle"
+                                title="Trascina per spostare il progetto"
+                                onMouseDown={(e) => {
+                                  e.preventDefault()
+                                  projectDragRef.current = project.id
+                                }}
+                              >⠿</span>
+                            )}
                             <span className="project-dot" style={{ background: colorOf(project.id) }} />
                             {project.name}
                           </td>
