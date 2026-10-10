@@ -5,7 +5,10 @@ import { Temporal } from '@js-temporal/polyfill'
 
 const today = Temporal.Now.plainDateISO()
 
+// The tasks are quadrato's and are read from there; logins and reschedules go through the
+// Gantt's own API app, so their events carry `app: gantt` and rank the Gantt in the launcher.
 const QUADRATO_API = 'https://api.simonegentili.com/quadrato'
+const GANTT_API = 'https://api.simonegentili.com/gantt'
 const QUADRATO_TASK_URL = 'https://quadrato.simonegentili.com/task/'
 const STATUS_TODO = 0
 const STATUS_IN_PROGRESS = 1
@@ -27,7 +30,7 @@ const dayColumnWidth = (table, visibleDays) =>
 
 // Cookie condiviso su .simonegentili.com: un utente già autenticato su un
 // altro prodotto della famiglia (es. quadrato) risulta loggato anche qui.
-const AUTH_URL = 'https://api.simonegentili.com/quadrato/authenticate'
+const AUTH_URL = `${GANTT_API}/authenticate`
 const COOKIE_NAME = 'simonegentili.com-access-token'
 const USERNAME_KEY = 'simonegentili.com-username'
 
@@ -358,7 +361,7 @@ function App() {
     if (mode !== 'start') body.timestamp = new Date(`${end.toString()}T${time}`).getTime()
     if (mode !== 'end') body.startsAt = Math.floor(new Date(`${start.toString()}T00:00:00`).getTime() / 1000)
     try {
-      const res = await fetch(`${QUADRATO_API}/task/${taskId}`, {
+      const res = await fetch(`${GANTT_API}/task/${taskId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getAuthCookie()}` },
         body: JSON.stringify(body),

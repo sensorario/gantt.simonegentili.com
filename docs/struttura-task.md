@@ -46,7 +46,7 @@ Accanto al nome di ogni task c'è un bottone ↗ che apre il task in quadrato (`
 | il bordo sinistro | solo l'inizio (mai oltre la fine) | `startsAt` |
 | il bordo destro | solo la fine (mai prima dell'inizio) | `timestamp` |
 
-Il salvataggio è `PUT /quadrato/task/:id`: `timestamp` in millisecondi, mantenendo l'orario che la scadenza aveva (le 09:00 se non ne aveva); `startsAt` in secondi Unix, mezzanotte del giorno scelto. Se il salvataggio non riesce la barra torna dov'era.
+Il salvataggio è `PUT /gantt/task/:id` (accetta solo `timestamp` e `startsAt`, poi aggiorna il task come farebbe quadrato e registra l'evento `TaskRescheduled` con `app: gantt`, che conta per l'ordine delle app nel launcher; anche il login dal Gantt passa da `POST /gantt/authenticate`): `timestamp` in millisecondi, mantenendo l'orario che la scadenza aveva (le 09:00 se non ne aveva); `startsAt` in secondi Unix, mezzanotte del giorno scelto. Se il salvataggio non riesce la barra torna dov'era.
 
 Il riordino verticale delle righe (maniglia ⠿) e le dipendenze tra task (`dependsOn`, frecce) restano funzioni del Gantt ma non vengono salvati: quadrato non ha né un ordine per il Gantt né dipendenze.
 
