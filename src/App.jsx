@@ -17,6 +17,9 @@ const NO_PROJECT_COLOR = '#cbd5e1'
 const PASTELS = ['#fecaca', '#fed7aa', '#fde68a', '#d9f99d', '#bbf7d0', '#a7f3d0', '#a5f3fc', '#bae6fd', '#c7d2fe', '#ddd6fe', '#f5d0fe', '#fbcfe8']
 const STATUS_TODO = 0
 const STATUS_IN_PROGRESS = 1
+// Nutrimondo's shopping list lands in this quadrato project (QUADRATO_PROJECT in its
+// src/pages/Spesa.tsx): things to buy, not work to plan, so the Gantt leaves it out.
+const SHOPPING_PROJECT = 'spesa'
 // Tasks with no due date are all parked in the same column, this far from today.
 const UNSCHEDULED_WEEKS = 3
 // Due time given to a task scheduled for the first time by dragging it.
@@ -213,11 +216,12 @@ function sortLikeQuadrato(tasks) {
   return [...due, ...undated].sort((a, b) => Number(b.status === STATUS_IN_PROGRESS) - Number(a.status === STATUS_IN_PROGRESS))
 }
 
-// What's being done and what's still to do: open quadrato tasks grouped by project,
-// each subtask right after its parent and one level deeper. A subtask whose parent
-// isn't shown (closed, archived, in another project) starts its own branch.
+// What's being done and what's still to do: open quadrato tasks grouped by project, but
+// the shopping list, each subtask right after its parent and one level deeper. A subtask
+// whose parent isn't shown (closed, archived, in another project) starts its own branch.
 function toProjects(tasks) {
-  const open = tasks.filter(t => !t.archived && (t.status === STATUS_TODO || t.status === STATUS_IN_PROGRESS))
+  const open = tasks.filter(t => !t.archived && (t.status === STATUS_TODO || t.status === STATUS_IN_PROGRESS)
+    && (t.project ?? '').trim().toLowerCase() !== SHOPPING_PROJECT)
   const byProject = new Map()
   for (const task of open) {
     const name = task.project || ''
