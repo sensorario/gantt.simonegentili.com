@@ -29,12 +29,10 @@ const MAX_NAME_WIDTH = 600
 
 const clampNameWidth = (width) => Math.min(MAX_NAME_WIDTH, Math.max(MIN_NAME_WIDTH, width))
 
-// The project colors quadrato and the Gantt share: saved on the project row (SetProjectColor
-// in the API), else the one quadrato used to keep in its config.
+// The user's project colors, the ones quadrato shows too (by name, in all their workspaces).
 function sharedColors(data) {
-  const config = data['simplanner-project-colors']
-  const saved = (data['simplanner-projects'] ?? []).filter(p => p.color).map(p => [p.name, p.color])
-  return { ...(config && typeof config === 'object' ? config : {}), ...Object.fromEntries(saved) }
+  const colors = data['simplanner-project-colors']
+  return colors && typeof colors === 'object' ? { ...colors } : {}
 }
 
 const hexToRgb = (hex) => /^#[0-9a-f]{6}$/i.test(hex) ? [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16)) : null
@@ -80,15 +78,17 @@ function inkOn(hex) {
   return rgb && 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2] < 128 ? '#ffffff' : '#1e293b'
 }
 
-// On the project's row, where quadrato reads it too.
-function saveProjectColor(name, color) {
+// Recorded by the API as a ProjectColorChanged event, then read by quadrato too. A `random`
+// color is kept only if the project still has none: resolves to the color it ends up with.
+function saveProjectColor(name, color, random = false) {
   return fetch(`${GANTT_API}/project-color`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getAuthCookie()}` },
-    body: JSON.stringify({ project: name, color }),
+    body: JSON.stringify(random ? { project: name, color, random } : { project: name, color }),
   }).then(res => {
     if (!res.ok) throw new Error(String(res.status))
-  })
+    return res.json()
+  }).then(saved => saved.color)
 }
 
 // One day column: the table minus the task-name column, whatever its current width.
@@ -391,7 +391,10 @@ function App() {
           if (id === NO_PROJECT_ID || colors[id]) continue
           colors[id] = randomPastel(taken)
           taken.push(hueOf(colors[id]))
-          saveProjectColor(id, colors[id]).catch(() => setSaveError(`Il colore del progetto ${id} non è stato salvato.`))
+          // Another tab or quadrato may have colored it meanwhile: that color wins.
+          saveProjectColor(id, colors[id], true)
+            .then(saved => setProjectColors(current => current[id] === saved ? current : { ...current, [id]: saved }))
+            .catch(() => setSaveError(`Il colore del progetto ${id} non è stato salvato.`))
         }
         setProjectColors(colors)
         setProjects(loaded)
