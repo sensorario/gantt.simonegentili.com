@@ -1,118 +1,61 @@
 # Struttura dei Task e Progetti
 
-## File di configurazione
+## Da dove vengono i dati
 
-I dati sono in `src/data/projects.js`. Questo file è pensato per essere sostituito in futuro da una chiamata API REST — il formato dei dati prodotto dall'API dovrà corrispondere a quello descritto qui.
+Il Gantt mostra i task di **quadrato** del workspace corrente, letti da `GET https://api.simonegentili.com/quadrato/data` con il token del cookie `simonegentili.com-access-token` (condiviso su `*.simonegentili.com`: chi ha fatto il login in quadrato è già dentro anche qui). Senza login non c'è niente da mostrare.
 
----
+La conversione sta in `src/App.jsx`, in `toProjects` e `toGanttTask`.
 
-## Struttura di un Progetto
+### Quali task
 
-```js
-{
-  id: 3,           // number — identificatore univoco del progetto
-  name: 'Scrivere', // string — nome visualizzato nell'header di gruppo
-  tasks: [ ... ],  // Task[] — lista dei task appartenenti al progetto
-}
-```
+- Solo quelli **da fare** (`status` 0) e **in corso** (`status` 1), non archiviati: cosa si sta facendo e cosa si dovrà fare.
+- Raggruppati per `project`; quelli senza progetto finiscono in "Nessun progetto".
+- I sotto-task (`parentId`) stanno subito sotto il padre, rientrati di un livello. Un sotto-task il cui padre non è mostrato (chiuso, archiviato, in un altro progetto) parte come primo livello.
 
----
+### Le date di una barra
 
-## Struttura di un Task
+| Barra | Da dove viene |
+|---|---|
+| fine | la scadenza del task (`timestamp`) |
+| inizio | l'inizio pianificato (`startsAt`, salvato dal Gantt); se manca il giorno di creazione (`createdAt`); se manca anche quello oggi; mai dopo la fine |
 
-```js
-{
-  id: 234,                        // number — identificatore univoco (usato da dependsOn)
-  name: 'JavaScript // II edition', // string — nome visualizzato nella colonna Task
-  start: new Date(2026, 0, 1),    // Date — data di inizio (inclusa)
-  end: new Date(2026, 5, 1),      // Date — data di fine (inclusa)
-  dependsOn: 234,                 // number | number[] | undefined — id del task padre
-}
-```
+I task **senza scadenza** e senza inizio pianificato sono barre di un giorno, tutte nella stessa colonna, `UNSCHEDULED_WEEKS` (3) settimane dopo oggi, tratteggiate. I task **in corso** sono arancioni.
 
-### Campi obbligatori
+### Padre e sotto-task
 
-| Campo | Tipo | Descrizione |
+- **Un sotto-task dipende dal suo task**: non inizia prima che il task sia finito, e una freccia rossa va dalla fine del task all'inizio del sotto-task. Vale a ogni livello tranne che sotto un task di primo livello.
+- **Il task di primo livello non ha frecce**: contiene i suoi sotto-task e finisce quando finisce l'ultimo, a qualunque profondità (la sua fine è la più lontana tra la sua scadenza e quelle dei discendenti). I task intermedi invece non vengono allungati: sono i loro sotto-task a venire dopo di loro.
+- **Tra fratelli non c'è nessun legame.**
+- Un task senza scadenza (parcheggiato qualche settimana avanti) è su una data finta: non dipende da nessuno, nessuno dipende da lui, non allunga nessuno. Un task di primo livello senza scadenza prende la fine dei sotto-task.
+- Le regole si applicano insieme finché niente si sposta più (`layout`). Al caricamento il Gantt mostra già il risultato, ma niente viene salvato finché non si trascina qualcosa; trascinando un task, ogni altro task che si sposta di conseguenza (un sotto-task spinto dopo, il task di primo livello allungato) viene salvato insieme a lui.
+
+## Aprire un task in quadrato
+
+Accanto al nome di ogni task c'è un bottone ↗ che apre il task in quadrato (`https://quadrato.simonegentili.com/task/:id`) in una nuova scheda.
+
+## Trascinare una barra
+
+| Cosa si trascina | Cosa cambia | Cosa si salva in quadrato |
 |---|---|---|
-| `id` | `number` | Identificatore univoco. Non deve ripetersi tra progetti diversi. |
-| `name` | `string` | Testo mostrato nella colonna "Task". |
-| `start` | `Date` | Data di inizio della barra nel Gantt. |
-| `end` | `Date` | Data di fine della barra nel Gantt. |
+| il centro della barra | inizio e fine insieme | `startsAt` e `timestamp` |
+| il bordo sinistro | solo l'inizio (mai oltre la fine) | `startsAt` |
+| il bordo destro | solo la fine (mai prima dell'inizio) | `timestamp` |
 
-### Campi opzionali
+Il salvataggio è `PUT /quadrato/task/:id`: `timestamp` in millisecondi, mantenendo l'orario che la scadenza aveva (le 09:00 se non ne aveva); `startsAt` in secondi Unix, mezzanotte del giorno scelto. Se il salvataggio non riesce la barra torna dov'era.
 
-| Campo | Tipo | Descrizione |
-|---|---|---|
-| `dependsOn` | `number \| number[]` | Id del task (o lista di id) da cui dipende. Quando il task padre viene spostato, il figlio si aggiusta automaticamente via `resolveConstraints`. |
+Il riordino verticale delle righe (maniglia ⠿) e le dipendenze tra task (`dependsOn`, frecce) restano funzioni del Gantt ma non vengono salvati: quadrato non ha né un ordine per il Gantt né dipendenze.
 
----
-
-## Aggiungere un task
-
-1. Aprire `src/data/projects.js`
-2. Aggiungere un oggetto nell'array `tasks` del progetto desiderato
-3. Scegliere un `id` non ancora usato
-4. Impostare `start` e `end` con `new Date(anno, mese, giorno)` — **nota**: il mese è 0-based (gennaio = 0, dicembre = 11)
+## Struttura interna di un task
 
 ```js
 {
-  id: 999,
-  name: 'Nuovo task',
-  start: new Date(2026, 9, 1),  // 2026-10-01
-  end: new Date(2026, 11, 31),  // 2026-12-31
+  id: 'uuid',              // id del task in quadrato
+  name: 'Titolo',          // title del task
+  depth: 0,                // 0 = primo livello, 1 = sotto-task, ...
+  inProgress: false,       // status === 1
+  unscheduled: false,      // nessuna scadenza in quadrato
+  dueTime: '09:00:00',     // orario della scadenza, riusato al salvataggio
+  start: Temporal.PlainDate,
+  end: Temporal.PlainDate,
 }
 ```
-
-## Rimuovere un task
-
-Eliminare l'oggetto corrispondente dall'array `tasks`. Se altri task hanno `dependsOn` puntato all'id rimosso, rimuovere o aggiornare anche quel campo.
-
----
-
-## Aggiungere un progetto
-
-```js
-{
-  id: 10,             // nuovo id univoco
-  name: 'Nome progetto',
-  tasks: [
-    // lista task
-  ],
-}
-```
-
----
-
-## Migrazione futura a API REST
-
-Quando sarà disponibile un'API, sarà sufficiente sostituire l'import in `App.jsx`:
-
-```js
-// Attuale (dati statici)
-import { initialProjects } from './data/projects'
-
-// Futuro (da API)
-const initialProjects = await fetch('/api/projects').then(r => r.json())
-// → convertire le date da stringa ISO a oggetti Date prima di passarle allo stato
-```
-
-Il formato JSON atteso dall'API:
-
-```json
-[
-  {
-    "id": 3,
-    "name": "Scrivere",
-    "tasks": [
-      {
-        "id": 234,
-        "name": "JavaScript // II edition",
-        "start": "2026-01-01",
-        "end": "2026-06-01"
-      }
-    ]
-  }
-]
-```
-
-Le date in stringa ISO dovranno essere convertite con `new Date(dateString)` prima di essere passate a `useState`.

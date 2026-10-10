@@ -2,9 +2,17 @@ import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import './App.css'
 import { SGFooter, QuadratoHeader } from '@sensorario/sg-components'
 import { Temporal } from '@js-temporal/polyfill'
-import { initialProjects } from './data/projects'
 
 const today = Temporal.Now.plainDateISO()
+
+const QUADRATO_API = 'https://api.simonegentili.com/quadrato'
+const QUADRATO_TASK_URL = 'https://quadrato.simonegentili.com/task/'
+const STATUS_TODO = 0
+const STATUS_IN_PROGRESS = 1
+// Tasks with no due date are all parked in the same column, this far from today.
+const UNSCHEDULED_WEEKS = 3
+// Due time given to a task scheduled for the first time by dragging it.
+const DEFAULT_DUE_TIME = '09:00:00'
 
 // Cookie condiviso su .simonegentili.com: un utente già autenticato su un
 // altro prodotto della famiglia (es. quadrato) risulta loggato anche qui.
@@ -20,6 +28,135 @@ function clearAuthCookie() {
   document.cookie = `${COOKIE_NAME}=; path=/; domain=.simonegentili.com; expires=Thu, 01 Jan 1970 00:00:00 GMT; secure; samesite=strict`
 }
 
+function getAuthCookie() {
+  const entry = document.cookie.split('; ').find(c => c.startsWith(`${COOKIE_NAME}=`))
+  return entry ? entry.slice(COOKIE_NAME.length + 1) : null
+}
+
+const dayOf = (unixSeconds) =>
+  Temporal.Instant.fromEpochMilliseconds(unixSeconds * 1000).toZonedDateTimeISO('Europe/Rome').toPlainDate()
+
+// One quadrato task as a bar. The end is the due date (`timestamp`, 'Y-m-d H:i:s' in
+// Rome time); the start is the planned start (`startsAt`, set by dragging here), else
+// the creation day, else today.
+function toGanttTask(task, depth, parentId) {
+  const due = task.timestamp ? String(task.timestamp) : null
+  const end = due ? Temporal.PlainDate.from(due.slice(0, 10)) : today.add({ weeks: UNSCHEDULED_WEEKS })
+  const planned = task.startsAt ? dayOf(task.startsAt) : null
+  const base = planned ?? (task.createdAt ? dayOf(task.createdAt) : today)
+  return {
+    id: task.id,
+    name: task.title,
+    depth,
+    // The parent shown in this project (null when it isn't): it ends no earlier than this task.
+    parentId,
+    inProgress: task.status === STATUS_IN_PROGRESS,
+    unscheduled: !due,
+    dueTime: due ? due.slice(11, 19) : null,
+    // Unscheduled ones with no plan are one day long, so they line up; a start after the end is clamped.
+    start: (!due && !planned) || Temporal.PlainDate.compare(base, end) > 0 ? end : base,
+    end,
+    // The task's own end; `end` may be pushed further by its subtasks (withParentEnds).
+    ownEnd: end,
+  }
+}
+
+// A top-level task ends no earlier than any of its subtasks, at any depth, as in quadrato
+// where it can't be closed while one is open: its end becomes the latest between its own
+// and its descendants'. Only top-level ones: a deeper task is instead depended on by its
+// subtasks (dependsOn), which start after it, so stretching it would push them forever.
+// A parked end (no due date) is made up: it pushes nobody, and a parked top-level task
+// simply takes its subtasks' end.
+function withParentEnds(tasks) {
+  const result = tasks.map(t => ({ ...t, end: t.ownEnd, raised: false }))
+  const byId = new Map(result.map(t => [t.id, t]))
+  const rootOf = (task) => {
+    let current = task
+    while (current.parentId != null && byId.has(current.parentId)) current = byId.get(current.parentId)
+    return current
+  }
+  for (const task of result) {
+    const root = rootOf(task)
+    if (root === task || task.unscheduled) continue
+    if ((root.unscheduled && !root.raised) || Temporal.PlainDate.compare(task.end, root.end) > 0) {
+      root.end = task.end
+      root.raised = true
+      if (Temporal.PlainDate.compare(root.start, root.end) > 0) root.start = root.end
+    }
+  }
+  return result
+}
+
+// Subtasks after their task (resolveConstraints) and top-level tasks stretched over
+// their subtasks (withParentEnds), repeated until nothing moves.
+function layout(tasks, movedId) {
+  let current = withParentEnds(tasks)
+  for (let i = 0; i <= tasks.length; i++) {
+    const before = new Map(current.map(t => [t.id, t]))
+    const next = withParentEnds(resolveConstraints(current, movedId).map(t =>
+      // A task pushed after the one it depends on has a new end of its own.
+      t.end.equals(before.get(t.id).end) ? t : { ...t, ownEnd: t.end }
+    ))
+    if (next.every(t => t.start.equals(before.get(t.id).start) && t.end.equals(before.get(t.id).end))) return next
+    current = next
+  }
+  return current
+}
+
+// Same order as quadrato's list (sortByDate in quadrato's src/utils/filterTaskByVisibilityRange.tsx):
+// in progress before to-do; within each, due ones first by due date, then the others by position.
+function sortLikeQuadrato(tasks) {
+  const due = tasks.filter(t => t.timestamp).sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)))
+  const undated = tasks.filter(t => !t.timestamp)
+    .sort((a, b) => (a.position ?? Number.MAX_SAFE_INTEGER) - (b.position ?? Number.MAX_SAFE_INTEGER))
+  return [...due, ...undated].sort((a, b) => Number(b.status === STATUS_IN_PROGRESS) - Number(a.status === STATUS_IN_PROGRESS))
+}
+
+// What's being done and what's still to do: open quadrato tasks grouped by project,
+// each subtask right after its parent and one level deeper. A subtask whose parent
+// isn't shown (closed, archived, in another project) starts its own branch.
+function toProjects(tasks) {
+  const open = tasks.filter(t => !t.archived && (t.status === STATUS_TODO || t.status === STATUS_IN_PROGRESS))
+  const byProject = new Map()
+  for (const task of open) {
+    const name = task.project || ''
+    byProject.set(name, [...(byProject.get(name) ?? []), task])
+  }
+
+  return [...byProject.entries()]
+    .sort(([a], [b]) => Number(a === '') - Number(b === '') || a.localeCompare(b))
+    .map(([name, projectTasks]) => {
+      const ids = new Set(projectTasks.map(t => t.id))
+      const parentOf = t => (t.parentId != null && ids.has(t.parentId) ? t.parentId : null)
+      const rows = []
+      const placed = new Set()
+      const visit = (parentId, depth, parentRow) => {
+        for (const task of sortLikeQuadrato(projectTasks.filter(t => parentOf(t) === parentId && !placed.has(t.id)))) {
+          placed.add(task.id)
+          const row = toGanttTask(task, depth, parentId)
+          // A subtask depends on its task (it starts once that one has ended), except under a
+          // top-level task: that one has no arrows, it just spans its subtasks (withParentEnds).
+          // Siblings don't depend on each other. A task with no due date sits on a made-up
+          // date, so it neither depends nor is depended on.
+          if (parentRow && parentRow.depth > 0 && !parentRow.unscheduled && !row.unscheduled) {
+            row.dependsOn = [parentRow.id]
+          }
+          rows.push(row)
+          visit(task.id, depth + 1, row)
+        }
+      }
+      visit(null, 0, null)
+      // Tasks caught in a parent cycle aren't reachable from the top: show them anyway.
+      for (const task of projectTasks.filter(t => !placed.has(t.id))) {
+        placed.add(task.id)
+        const row = toGanttTask(task, 0, null)
+        rows.push(row)
+        visit(task.id, 1, row)
+      }
+      return { id: name || '__no-project__', name: name || 'Nessun progetto', tasks: layout(rows, null) }
+    })
+}
+
 function getColumns(offset, visibleDays) {
   const now = Temporal.Now.plainDateISO()
   return Array.from({ length: visibleDays }, (_, i) => {
@@ -30,6 +167,20 @@ function getColumns(offset, visibleDays) {
       isToday: Temporal.PlainDate.compare(date, now) === 0,
     }
   })
+}
+
+// Where a dragged bar lands: the middle moves both dates, an edge only its own,
+// never past the other one.
+function draggedDates(mode, start, end, days) {
+  if (mode === 'start') {
+    const moved = start.add({ days })
+    return { start: Temporal.PlainDate.compare(moved, end) > 0 ? end : moved, end }
+  }
+  if (mode === 'end') {
+    const moved = end.add({ days })
+    return { start, end: Temporal.PlainDate.compare(moved, start) < 0 ? start : moved }
+  }
+  return { start: start.add({ days }), end: end.add({ days }) }
 }
 
 function isBetween(date, start, end) {
@@ -108,12 +259,44 @@ function App() {
     clearAuthCookie()
     localStorage.removeItem(USERNAME_KEY)
     setUsername(null)
+    setProjects(null)
   }
 
-  const [offset, setOffset] = useState(-21)
-  const [projects, setProjects] = useState(initialProjects)
+  // A week back: with the 30-day default, today and the unscheduled tasks (UNSCHEDULED_WEEKS ahead) stay in view.
+  const [offset, setOffset] = useState(-7)
+  // null until quadrato's tasks arrive (or while logged out)
+  const [projects, setProjects] = useState(null)
+  const [loadError, setLoadError] = useState(null)
+  const [saveError, setSaveError] = useState(null)
+
+  useEffect(() => {
+    // The cookie is shared across *.simonegentili.com: a login in quadrato counts here too.
+    const token = getAuthCookie()
+    if (!token) return
+    let cancelled = false
+    fetch(`${QUADRATO_API}/data`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(res => {
+        if (res.status === 401) {
+          clearAuthCookie()
+          localStorage.removeItem(USERNAME_KEY)
+          setUsername(null)
+          return null
+        }
+        if (!res.ok) throw new Error(String(res.status))
+        return res.json()
+      })
+      .then(json => {
+        if (cancelled || !json) return
+        setLoadError(null)
+        setProjects(toProjects(json['simplanner-tasks'] ?? []))
+      })
+      .catch(() => {
+        if (!cancelled) setLoadError('Impossibile caricare i task di quadrato.')
+      })
+    return () => { cancelled = true }
+  }, [username])
   const [selectedProjectId, setSelectedProjectId] = useState(null) // null = tutti
-  const [visibleDays, setVisibleDays] = useState(180)
+  const [visibleDays, setVisibleDays] = useState(30)
   const [hidePastTasks, setHidePastTasks] = useState(false)
   const [arrows, setArrows] = useState([])
   const [todayLine, setTodayLine] = useState(null)
@@ -129,9 +312,10 @@ function App() {
   const containerRef = useRef(null)
 
   // Righe visibili: task raggruppati per progetto con header progetto
+  const loadedProjects = projects ?? []
   const visibleProjects = selectedProjectId === null
-    ? projects
-    : projects.filter(p => p.id === selectedProjectId)
+    ? loadedProjects
+    : loadedProjects.filter(p => p.id === selectedProjectId)
 
   const isPastTask = (task) => Temporal.PlainDate.compare(task.end, today) < 0
 
@@ -139,9 +323,42 @@ function App() {
   const flatTasks = visibleProjects.flatMap(p => p.tasks)
 
   const setProjectTasks = (projectId, updater) => {
-    setProjects(prev => prev.map(p =>
+    setProjects(prev => prev && prev.map(p =>
       p.id === projectId ? { ...p, tasks: updater(p.tasks) } : p
     ))
+  }
+
+  // Dropping a bar reschedules the task in quadrato: the due date (end) and/or the
+  // planned start, whichever the drag changed.
+  const saveDates = async ({ taskId, projectId, mode, origStart, origEnd, dueTime }, { start, end }) => {
+    const time = dueTime ?? DEFAULT_DUE_TIME
+    // Local time: the browser and the API are both on Italian time.
+    const body = {}
+    if (mode !== 'start') body.timestamp = new Date(`${end.toString()}T${time}`).getTime()
+    if (mode !== 'end') body.startsAt = Math.floor(new Date(`${start.toString()}T00:00:00`).getTime() / 1000)
+    try {
+      const res = await fetch(`${QUADRATO_API}/task/${taskId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getAuthCookie()}` },
+        body: JSON.stringify(body),
+      })
+      if (res.status === 401) {
+        handleLogout()
+        return
+      }
+      if (!res.ok) throw new Error(String(res.status))
+      setSaveError(null)
+      if (body.timestamp !== undefined) {
+        setProjectTasks(projectId, prev => withParentEnds(prev.map(t =>
+          t.id === taskId ? { ...t, unscheduled: false, dueTime: time, ownEnd: end } : t
+        )))
+      }
+    } catch {
+      setSaveError("Salvataggio delle date non riuscito: la barra è tornata dov'era.")
+      setProjectTasks(projectId, prev => withParentEnds(prev.map(t =>
+        t.id === taskId ? { ...t, start: origStart, ownEnd: origEnd } : t
+      )))
+    }
   }
 
   useEffect(() => {
@@ -184,13 +401,11 @@ function App() {
         setProjectTasks(projectId, prev => {
           const updated = prev.map(t => {
             if (t.id !== taskId) return t
-            return {
-              ...t,
-              start: dragRef.current.origStart.add({ days: deltaDays }),
-              end: dragRef.current.origEnd.add({ days: deltaDays }),
-            }
+            const { mode, origStart, origEnd } = dragRef.current
+            const dates = draggedDates(mode, origStart, origEnd, deltaDays)
+            return { ...t, ...dates, ownEnd: dates.end }
           })
-          return resolveConstraints(updated, taskId)
+          return layout(updated, taskId)
         })
       }
 
@@ -200,7 +415,7 @@ function App() {
         if (!el) continue
         const rect = el.getBoundingClientRect()
         if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
-          overId = Number(id)
+          overId = id
           break
         }
       }
@@ -208,8 +423,30 @@ function App() {
     }
     const handleMouseUp = () => {
       if (!dragRef.current) return
-      const { taskId, projectId } = dragRef.current
+      const drag = dragRef.current
+      const { taskId, projectId } = drag
       dragRef.current = null
+      // Recomputed from the tasks as they were at mousedown, so what gets saved doesn't
+      // depend on how many mousemoves the state went through.
+      const dates = draggedDates(drag.mode, drag.origStart, drag.origEnd, drag.lastDelta)
+      const before = new Map(drag.snapshot.map(t => [t.id, t]))
+      const after = layout(drag.snapshot.map(t =>
+        t.id === taskId ? { ...t, ...dates, ownEnd: dates.end } : t
+      ), taskId)
+      for (const t of after) {
+        const old = before.get(t.id)
+        const startMoved = !t.start.equals(old.start)
+        const endMoved = !t.end.equals(old.end)
+        // An edge pushed against the other one may end up exactly where it started.
+        if (!startMoved && !endMoved) continue
+        if (t.id === taskId) {
+          saveDates(drag, t)
+        } else {
+          // Moved along by the drag: a subtask pushed after it, or the top-level task stretched over it.
+          const mode = startMoved && endMoved ? 'move' : startMoved ? 'start' : 'end'
+          saveDates({ taskId: t.id, projectId, mode, origStart: old.start, origEnd: old.end, dueTime: t.dueTime }, t)
+        }
+      }
 
       setDragOverId(prev => {
         if (prev !== null && prev !== taskId) {
@@ -232,6 +469,8 @@ function App() {
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
     }
+    // Registered once: saveDates from the first render only touches state setters, which never change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -242,7 +481,7 @@ function App() {
         if (!el) continue
         const rect = el.getBoundingClientRect()
         if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
-          overId = Number(id)
+          overId = id
           break
         }
       }
@@ -275,15 +514,20 @@ function App() {
     }
   }, [dragOverId])
 
-  const handleBarMouseDown = (e, task, projectId) => {
+  // mode: 'move' (the bar), 'start' or 'end' (one of its edges)
+  const handleBarMouseDown = (e, task, projectId, mode = 'move') => {
+    e.stopPropagation()
     const colWidth = e.currentTarget.closest('table').offsetWidth / (visibleDays + 1)
     dragRef.current = {
       taskId: task.id,
       projectId,
+      mode,
       startX: e.clientX,
       colWidth,
       origStart: task.start,
       origEnd: task.end,
+      dueTime: task.dueTime,
+      snapshot: loadedProjects.find(p => p.id === projectId).tasks,
       lastDelta: 0,
     }
     e.preventDefault()
@@ -339,7 +583,7 @@ function App() {
           <button className="btn" onClick={() => setOffset(o => o - 1)}>&#8592;</button>
           <button className="btn" onClick={() => setOffset(o => o + 1)}>&#8594;</button>
           <span className="subtitle">Giorni:</span>
-          {[90, 180, 365].map(d => (
+          {[30, 90, 180, 365].map(d => (
             <button
               key={d}
               className={`btn${visibleDays === d ? ' active' : ''}`}
@@ -351,7 +595,7 @@ function App() {
             className={`btn${selectedProjectId === null ? ' active' : ''}`}
             onClick={() => setSelectedProjectId(null)}
           >Tutti</button>
-          {projects.map(p => (
+          {loadedProjects.map(p => (
             <button
               key={p.id}
               className={`btn${selectedProjectId === p.id ? ' active' : ''}`}
@@ -364,6 +608,11 @@ function App() {
             onClick={() => setHidePastTasks(h => !h)}
           >Nascondi passati</button>
         </div>
+        {!getAuthCookie() && <p className="gantt-message">Accedi per vedere i task di quadrato.</p>}
+        {getAuthCookie() && projects === null && !loadError && <p className="gantt-message">Caricamento dei task di quadrato…</p>}
+        {projects !== null && projects.length === 0 && <p className="gantt-message">Nessun task da fare o in corso.</p>}
+        {loadError && <p className="gantt-message gantt-message--error">{loadError}</p>}
+        {saveError && <p className="gantt-message gantt-message--error">{saveError}</p>}
         <div className="gantt-card">
           <div ref={containerRef} style={{ position: 'relative' }}>
             <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }}>
@@ -374,11 +623,18 @@ function App() {
                   className="today-line"
                 />
               )}
+              <defs>
+                <marker id="dep-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                  <path d="M0,0 L10,5 L0,10 z" className="dep-arrow-head" />
+                </marker>
+              </defs>
+              {/* From the end of the task depended on (x2, y2) to the start of the dependent one (x1, y1). */}
               {arrows.map(({ id, x1, y1, x2, y2 }) => (
                 <path
                   key={id}
                   className="dep-line"
-                  d={`M${x1},${y1} C${x1 - 40},${y1} ${x2 + 40},${y2} ${x2},${y2}`}
+                  markerEnd="url(#dep-arrow)"
+                  d={`M${x2},${y2} C${x2 + 40},${y2} ${x1 - 40},${y1} ${x1},${y1}`}
                 />
               ))}
             </svg>
@@ -430,7 +686,15 @@ function App() {
                                 className="drag-handle"
                                 onMouseDown={() => { rowDragRef.current = { taskId: task.id, projectId: project.id } }}
                               >⠿</span>
-                              {task.name}
+                              <span style={{ paddingLeft: task.depth * 16 }}>{task.name}</span>
+                              <a
+                                className="open-in-quadrato"
+                                href={`${QUADRATO_TASK_URL}${task.id}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title="Apri il task in quadrato"
+                                aria-label={`Apri ${task.name} in quadrato`}
+                              >↗</a>
                             </div>
                           </td>
                           {firstActive === -1 ? (
@@ -440,10 +704,21 @@ function App() {
                               {firstActive > 0 && <td colSpan={firstActive}></td>}
                               <td colSpan={lastActive - firstActive + 1} className="cell-bar">
                                 <div
-                                  className="bar"
+                                  className={`bar${task.inProgress ? ' bar--doing' : ''}${task.unscheduled ? ' bar--unscheduled' : ''}`}
+                                  title={task.unscheduled ? 'Senza scadenza: trascinala per pianificarla' : undefined}
                                   ref={el => barRefs.current[task.id] = el}
                                   onMouseDown={(e) => handleBarMouseDown(e, task, project.id)}
                                 >
+                                  <span
+                                    className="bar-handle bar-handle--start"
+                                    title="Trascina per spostare la data di inizio"
+                                    onMouseDown={(e) => handleBarMouseDown(e, task, project.id, 'start')}
+                                  />
+                                  <span
+                                    className="bar-handle bar-handle--end"
+                                    title="Trascina per spostare la data di fine"
+                                    onMouseDown={(e) => handleBarMouseDown(e, task, project.id, 'end')}
+                                  />
                                   <span className="bar-date bar-date-start">
                                     {task.start.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })}
                                   </span>

@@ -153,6 +153,24 @@
   color: #94a3b8;
 }
 
+.open-in-quadrato {
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: 0 6px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  color: #5480e6;
+  font-size: 12px;
+  line-height: 18px;
+  text-decoration: none;
+}
+
+.open-in-quadrato:hover {
+  background: #5480e6;
+  border-color: #5480e6;
+  color: #fff;
+}
+
 .cell-bar {
   padding: 6px 4px;
   vertical-align: middle;
@@ -177,6 +195,53 @@
   filter: brightness(1.08);
 }
 
+/* Bordi della barra: trascinandoli si sposta solo la data di inizio o di fine */
+.bar-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+  z-index: 1;
+}
+
+.bar-handle--start {
+  left: 0;
+  border-radius: 6px 0 0 6px;
+}
+
+.bar-handle--end {
+  right: 0;
+  border-radius: 0 6px 6px 0;
+}
+
+.bar:hover .bar-handle {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+/* In corso in quadrato */
+.bar--doing {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  box-shadow: 0 1px 3px rgba(245,158,11,0.4);
+}
+
+/* Senza scadenza: parcheggiata qualche settimana più avanti finché non la si trascina */
+.bar--unscheduled {
+  background: repeating-linear-gradient(135deg, #cbd5e1, #cbd5e1 4px, #e2e8f0 4px, #e2e8f0 8px);
+  box-shadow: none;
+  border: 1px dashed #94a3b8;
+}
+
+.gantt-message {
+  margin: 8px 0;
+  font-size: 14px;
+  color: #64748b;
+}
+
+.gantt-message--error {
+  color: #dc2626;
+}
+
 .bar-date {
   font-size: 10px;
   font-weight: 600;
@@ -197,6 +262,11 @@
   stroke-width: 1.5;
   stroke-dasharray: 5 3;
   fill: none;
+}
+
+/* Punta della freccia, sul task dipendente */
+.dep-arrow-head {
+  fill: #f87171;
 }
 
 .today-line {
