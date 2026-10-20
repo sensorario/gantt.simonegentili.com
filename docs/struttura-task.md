@@ -21,6 +21,18 @@ La conversione sta in `src/App.jsx`, in `toProjects` e `toGanttTask`.
 
 I task **senza scadenza** e senza inizio pianificato sono barre di un giorno, tutte nella stessa colonna, `UNSCHEDULED_WEEKS` (3) settimane dopo oggi, tratteggiate. Ogni barra ha il colore del suo progetto; i task **in corso** hanno in più un bordo scuro dello stesso colore.
 
+### Un solo progetto
+
+I bottoni dei progetti in alto mostrano un progetto solo ("Tutti" li rimette tutti). Il progetto mostrato è nella rotta:
+
+| Rotta | Mostra |
+|---|---|
+| `/` | tutti i progetti |
+| `/progetto/<nome>` | il progetto `<nome>` (codificato, per esempio `/progetto/Lavoro%20d'ufficio`) |
+| `/senza-progetto` | "Nessun progetto" |
+
+Scegliere un progetto dai bottoni cambia la rotta e aggiunge una pagina alla cronologia: "Indietro" del browser torna al progetto di prima, un ricaricamento resta sullo stesso. Da fuori si apre il Gantt su un progetto con la sua rotta: lo fa il logo del Gantt nel dettaglio di un task di quadrato. Una rotta sconosciuta, o un progetto che qui non c'è (nessun task aperto, o `spesa`), mostra tutti i progetti. Le rotte arrivano all'app grazie a `.htaccess`, che manda a `index.html` ogni indirizzo che non è un file.
+
 ### Ordine dei progetti
 
 Con il raggruppamento per progetto attivo, ogni intestazione di progetto ha una maniglia ⠿: trascinandola sulla sezione di un altro progetto, il progetto prende il suo posto (come il riordino delle righe). "Nessun progetto" resta sempre in fondo. L'ordine è dell'utente, per nome e uguale in tutti i suoi workspace: si salva al rilascio con `PUT /gantt/project-order` (evento `ProjectsReordered`, proiezione `project_orders`) e torna con `simplanner-project-order` di `GET /quadrato/data`. I progetti che l'ordine non conosce ancora vanno dopo, in ordine alfabetico; quelli dell'ordine che qui non ci sono (altri workspace, solo task chiusi) restano in coda, nello stesso ordine. Anche i bottoni dei progetti in alto seguono questo ordine.

@@ -11,6 +11,27 @@ const QUADRATO_API = 'https://api.simonegentili.com/quadrato'
 const GANTT_API = 'https://api.simonegentili.com/gantt'
 const QUADRATO_TASK_URL = 'https://quadrato.simonegentili.com/task/'
 const NO_PROJECT_ID = '__no-project__'
+
+// The routes: / shows every project, /progetto/<name> one of them, /senza-progetto the tasks
+// without one (quadrato's task detail links to them). Anything else shows every project.
+const PROJECT_ROUTE = '/progetto/'
+const NO_PROJECT_ROUTE = '/senza-progetto'
+
+const projectOfPath = (pathname) => {
+  const path = pathname.replace(/\/+$/, '')
+  if (path === NO_PROJECT_ROUTE) return NO_PROJECT_ID
+  if (!path.startsWith(PROJECT_ROUTE)) return null
+  try {
+    return decodeURIComponent(path.slice(PROJECT_ROUTE.length)) || null
+  } catch {
+    // A malformed address, as typed: no project in it.
+    return null
+  }
+}
+
+const pathOfProject = (id) =>
+  id === null ? '/' : id === NO_PROJECT_ID ? NO_PROJECT_ROUTE : PROJECT_ROUTE + encodeURIComponent(id)
+
 // Tasks with no project have no color of their own.
 const NO_PROJECT_COLOR = '#cbd5e1'
 // Offered by the color picker; a project with no color yet gets a random pastel.
@@ -433,7 +454,18 @@ function App() {
       })
     return () => { cancelled = true }
   }, [username])
-  const [selectedProjectId, setSelectedProjectId] = useState(null) // null = tutti
+  // null = tutti. The route says which project is shown: picking one is a new page in the
+  // history, so the browser's Back goes to the one before.
+  const [selectedProjectId, setSelectedProjectId] = useState(() => projectOfPath(window.location.pathname))
+  const selectProject = (id) => {
+    setSelectedProjectId(id)
+    if (pathOfProject(id) !== window.location.pathname) window.history.pushState(null, '', pathOfProject(id))
+  }
+  useEffect(() => {
+    const handlePopState = () => setSelectedProjectId(projectOfPath(window.location.pathname))
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [])
   const [visibleDays, setVisibleDays] = useState(14)
   const [hidePastTasks, setHidePastTasks] = useState(false)
   // Off: one list of every task, ordered by start date.
@@ -471,9 +503,9 @@ function App() {
 
   // Righe visibili: task raggruppati per progetto con header progetto
   const loadedProjects = projects ?? []
-  const visibleProjects = selectedProjectId === null
-    ? loadedProjects
-    : loadedProjects.filter(p => p.id === selectedProjectId)
+  // One asked for in the address that isn't here (nothing open in it) shows them all.
+  const selectedProject = loadedProjects.find(p => p.id === selectedProjectId) ?? null
+  const visibleProjects = selectedProject ? [selectedProject] : loadedProjects
 
   const isPastTask = (task) => Temporal.PlainDate.compare(task.end, today) < 0
   const shownTasks = (project) => frozenRows
@@ -954,8 +986,8 @@ function App() {
           ))}
           <span className="subtitle" style={{ marginLeft: '12px' }}>Progetto:</span>
           <button
-            className={`btn${selectedProjectId === null ? ' active' : ''}`}
-            onClick={() => setSelectedProjectId(null)}
+            className={`btn${selectedProject === null ? ' active' : ''}`}
+            onClick={() => selectProject(null)}
           >Tutti</button>
           {loadedProjects.map(p => (
             <span key={p.id} className="project-filter">
@@ -966,7 +998,7 @@ function App() {
               )}
               <button
                 className={`btn${selectedProjectId === p.id ? ' active' : ''}`}
-                onClick={() => setSelectedProjectId(p.id)}
+                onClick={() => selectProject(p.id)}
               >{p.name}</button>
             </span>
           ))}
