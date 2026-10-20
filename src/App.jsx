@@ -147,6 +147,8 @@ function toGanttTask(task, depth, parentId) {
   const end = due ? Temporal.PlainDate.from(due.slice(0, 10)) : today.add({ weeks: UNSCHEDULED_WEEKS })
   const planned = task.startsAt ? dayOf(task.startsAt) : null
   const base = planned ?? (task.createdAt ? dayOf(task.createdAt) : today)
+  // Unscheduled ones with no plan are one day long, so they line up; a start after the end is clamped.
+  const start = (!due && !planned) || Temporal.PlainDate.compare(base, end) > 0 ? end : base
   return {
     id: task.id,
     name: task.title,
@@ -156,22 +158,22 @@ function toGanttTask(task, depth, parentId) {
     inProgress: task.status === STATUS_IN_PROGRESS,
     unscheduled: !due,
     dueTime: due ? due.slice(11, 19) : null,
-    // Unscheduled ones with no plan are one day long, so they line up; a start after the end is clamped.
-    start: (!due && !planned) || Temporal.PlainDate.compare(base, end) > 0 ? end : base,
+    start,
     end,
-    // The task's own end; `end` may be pushed further by its subtasks (withParentEnds).
+    // The task's own dates; `start` and `end` may be stretched over its subtasks (withParentEnds).
+    ownStart: start,
     ownEnd: end,
   }
 }
 
-// A top-level task ends no earlier than any of its subtasks, at any depth, as in quadrato
-// where it can't be closed while one is open: its end becomes the latest between its own
-// and its descendants'. Only top-level ones: a deeper task is instead depended on by its
-// subtasks (dependsOn), which start after it, so stretching it would push them forever.
+// A top-level task spans its subtasks, at any depth: it ends no earlier than any of them,
+// as in quadrato where it can't be closed while one is open, and starts no later than any
+// of them. Only top-level ones: a deeper task is instead depended on by its subtasks
+// (dependsOn), which start after it, so stretching it would push them forever.
 // A parked end (no due date) is made up: it pushes nobody, and a parked top-level task
 // simply takes its subtasks' end.
 function withParentEnds(tasks) {
-  const result = tasks.map(t => ({ ...t, end: t.ownEnd, raised: false }))
+  const result = tasks.map(t => ({ ...t, start: t.ownStart, end: t.ownEnd, raised: false }))
   const byId = new Map(result.map(t => [t.id, t]))
   const rootOf = (task) => {
     let current = task
@@ -181,10 +183,10 @@ function withParentEnds(tasks) {
   for (const task of result) {
     const root = rootOf(task)
     if (root === task || task.unscheduled) continue
+    if (Temporal.PlainDate.compare(task.start, root.start) < 0) root.start = task.start
     if ((root.unscheduled && !root.raised) || Temporal.PlainDate.compare(task.end, root.end) > 0) {
       root.end = task.end
       root.raised = true
-      if (Temporal.PlainDate.compare(root.start, root.end) > 0) root.start = root.end
     }
   }
   return result
@@ -198,8 +200,8 @@ function layout(tasks, movedIds) {
   for (let i = 0; i <= tasks.length; i++) {
     const before = new Map(current.map(t => [t.id, t]))
     const next = withParentEnds(resolveConstraints(current, movedIds).map(t =>
-      // A task pushed after the one it depends on has a new end of its own.
-      t.end.equals(before.get(t.id).end) ? t : { ...t, ownEnd: t.end }
+      // A task pushed after (or before) the one it depends on has new dates of its own.
+      t.end.equals(before.get(t.id).end) ? t : { ...t, ownStart: t.start, ownEnd: t.end }
     ))
     if (next.every(t => t.start.equals(before.get(t.id).start) && t.end.equals(before.get(t.id).end))) return next
     current = next
@@ -294,7 +296,7 @@ function withDragged(tasks, drag, days) {
     const orig = drag.moved.get(t.id)
     if (!orig) return t
     const dates = draggedDates(drag.mode, orig.start, orig.end, days)
-    return { ...t, ...dates, ownEnd: dates.end }
+    return { ...t, ...dates, ownStart: dates.start, ownEnd: dates.end }
   })
 }
 
@@ -515,15 +517,15 @@ function App() {
       }
       if (!res.ok) throw new Error(String(res.status))
       setSaveError(null)
-      if (body.timestamp !== undefined) {
-        setProjectTasks(projectId, prev => withParentEnds(prev.map(t =>
-          t.id === taskId ? { ...t, unscheduled: false, dueTime: time, ownEnd: end } : t
-        )))
-      }
+      setProjectTasks(projectId, prev => withParentEnds(prev.map(t => t.id !== taskId ? t : {
+        ...t,
+        ...(body.startsAt !== undefined && { ownStart: start }),
+        ...(body.timestamp !== undefined && { unscheduled: false, dueTime: time, ownEnd: end }),
+      })))
     } catch {
       setSaveError("Salvataggio delle date non riuscito: la barra è tornata dov'era.")
       setProjectTasks(projectId, prev => withParentEnds(prev.map(t =>
-        t.id === taskId ? { ...t, start: origStart, ownEnd: origEnd } : t
+        t.id === taskId ? { ...t, ownStart: origStart, ownEnd: origEnd } : t
       )))
     }
   }

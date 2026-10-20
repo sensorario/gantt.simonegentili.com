@@ -32,10 +32,10 @@ Il colore è dell'utente, legato al nome del progetto e uguale in tutti i suoi w
 ### Padre e sotto-task
 
 - **Un sotto-task dipende dal suo task**: non inizia prima che il task sia finito, e una freccia rossa va dalla fine del task all'inizio del sotto-task. Vale a ogni livello tranne che sotto un task di primo livello.
-- **Il task di primo livello non ha frecce**: contiene i suoi sotto-task e finisce quando finisce l'ultimo, a qualunque profondità (la sua fine è la più lontana tra la sua scadenza e quelle dei discendenti). I task intermedi invece non vengono allungati: sono i loro sotto-task a venire dopo di loro.
+- **Il task di primo livello non ha frecce**: contiene i suoi sotto-task, a qualunque profondità. Finisce quando finisce l'ultimo (la sua fine è la più lontana tra la sua scadenza e quelle dei discendenti) e inizia quando inizia il primo (il suo inizio è il più vicino tra il suo e quelli dei discendenti): spostando un sotto-task avanti oltre la fine del task, la fine lo segue; spostandolo indietro prima dell'inizio, l'inizio lo segue. Una volta salvate, le date allungate diventano quelle del task: riportando indietro (o avanti) il sotto-task, il task resta lungo. I task intermedi invece non vengono allungati: sono i loro sotto-task a venire dopo di loro.
 - **Tra fratelli non c'è nessun legame.**
-- Un task senza scadenza (parcheggiato qualche settimana avanti) è su una data finta: non dipende da nessuno, nessuno dipende da lui, non allunga nessuno. Un task di primo livello senza scadenza prende la fine dei sotto-task.
-- Le regole si applicano insieme finché niente si sposta più (`layout`). Al caricamento il Gantt mostra già il risultato, ma niente viene salvato finché non si trascina qualcosa; trascinando un task, ogni altro task che si sposta di conseguenza (un sotto-task spinto dopo, il task di primo livello allungato) viene salvato insieme a lui.
+- Un task senza scadenza (parcheggiato qualche settimana avanti) è su una data finta: non dipende da nessuno, nessuno dipende da lui, non allunga nessuno. Un task di primo livello senza scadenza prende la fine dei sotto-task, e va indietro fino al loro inizio.
+- Le regole si applicano insieme finché niente si sposta più (`layout`). Al caricamento il Gantt mostra già il risultato, ma niente viene salvato finché non si trascina qualcosa; trascinando un task, ogni altro task che si sposta di conseguenza (un sotto-task spinto dopo, il task di primo livello allungato avanti o indietro) viene salvato insieme a lui.
 
 ## La vista
 
