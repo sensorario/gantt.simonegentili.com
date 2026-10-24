@@ -168,6 +168,16 @@
   gap: 6px;
 }
 
+.task-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.task-name .sg-icon {
+  flex-shrink: 0;
+}
+
 .drag-handle {
   cursor: grab;
   color: #cbd5e1;

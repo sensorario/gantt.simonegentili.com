@@ -1,6 +1,6 @@
 import { Fragment, useState, useEffect, useLayoutEffect, useRef } from 'react'
 import './App.css'
-import { ColorPicker, SGFooter, QuadratoHeader } from '@sensorario/sg-components'
+import { ColorPicker, Icon, SGFooter, QuadratoHeader } from '@sensorario/sg-components'
 import { Temporal } from '@js-temporal/polyfill'
 
 const today = Temporal.Now.plainDateISO()
@@ -41,6 +41,19 @@ const STATUS_IN_PROGRESS = 1
 // Nutrimondo's shopping list lands in this quadrato project (QUADRATO_PROJECT in its
 // src/pages/Spesa.tsx): things to buy, not work to plan, so the Gantt leaves it out.
 const SHOPPING_PROJECT = 'spesa'
+// Quadrato's task types (TASK_TYPES and taskTypeIcons in quadrato's src/components/TaskTitle.tsx):
+// a task's type is the start of its title, "[epic] Release" is an epic called "Release".
+const TASK_TYPE_ICONS = {
+  feature: { name: 'sparkle', color: '#5480e6' },
+  bug: { name: 'bug', color: '#e2727d' },
+  pay: { name: 'credit-card', color: '#2e9e5b' },
+  spike: { name: 'books', color: '#9b6bd1' },
+  epic: { name: 'zap', color: '#e08a2e' },
+  chore: { name: 'wrench', color: '#7d8796' },
+  docs: { name: 'file-text', color: '#2a9d9a' },
+}
+const TASK_TYPE_PREFIX = new RegExp(`^\\[(${Object.keys(TASK_TYPE_ICONS).join('|')})\\]\\s*`, 'i')
+const EPIC = 'epic'
 // Tasks with no due date are all parked in the same column, this far from today.
 const UNSCHEDULED_WEEKS = 3
 // Due time given to a task scheduled for the first time by dragging it.
@@ -170,9 +183,11 @@ function toGanttTask(task, depth, parentId) {
   const base = planned ?? (task.createdAt ? dayOf(task.createdAt) : today)
   // Unscheduled ones with no plan are one day long, so they line up; a start after the end is clamped.
   const start = (!due && !planned) || Temporal.PlainDate.compare(base, end) > 0 ? end : base
+  const typePrefix = TASK_TYPE_PREFIX.exec(task.title)
   return {
     id: task.id,
-    name: task.title,
+    name: typePrefix ? task.title.slice(typePrefix[0].length) : task.title,
+    type: typePrefix ? typePrefix[1].toLowerCase() : null,
     depth,
     // The parent shown in this project (null when it isn't): it ends no earlier than this task.
     parentId,
@@ -468,6 +483,8 @@ function App() {
   }, [])
   const [visibleDays, setVisibleDays] = useState(14)
   const [hidePastTasks, setHidePastTasks] = useState(false)
+  // Only the epics, each still spanning its subtasks (withParentEnds), which are hidden.
+  const [onlyEpics, setOnlyEpics] = useState(false)
   // Off: one list of every task, ordered by start date.
   const [groupByProject, setGroupByProject] = useState(true)
   const [nameWidth, setNameWidth] = useState(() => {
@@ -510,7 +527,7 @@ function App() {
   const isPastTask = (task) => Temporal.PlainDate.compare(task.end, today) < 0
   const shownTasks = (project) => frozenRows
     ? project.tasks.filter(t => frozenRows.includes(t.id))
-    : hidePastTasks ? project.tasks.filter(t => !isPastTask(t)) : project.tasks
+    : project.tasks.filter(t => (!hidePastTasks || !isPastTask(t)) && (!onlyEpics || t.type === EPIC))
   // Not grouped by project: one list by start date (ties by end).
   const flatRows = visibleProjects
     .flatMap(project => shownTasks(project).map(task => ({ task, projectId: project.id })))
@@ -914,7 +931,18 @@ function App() {
                 onMouseDown={() => { rowDragRef.current = { taskId: task.id, projectId } }}
               >⠿</span>
             )}
-            <span style={{ paddingLeft: groupByProject ? task.depth * 16 : 0 }}>{task.name}</span>
+            <span className="task-name" style={{ paddingLeft: groupByProject ? task.depth * 16 : 0 }}>
+              {task.type && (
+                <Icon
+                  name={TASK_TYPE_ICONS[task.type].name}
+                  size={14}
+                  aria-hidden={false}
+                  aria-label={task.type}
+                  style={{ color: TASK_TYPE_ICONS[task.type].color }}
+                />
+              )}
+              {task.name}
+            </span>
             <a
               className="open-in-quadrato"
               href={`${QUADRATO_TASK_URL}${task.id}`}
@@ -1008,6 +1036,13 @@ function App() {
             onClick={() => setHidePastTasks(h => !h)}
           >Nascondi passati</button>
           <button
+            className={`btn${onlyEpics ? ' active' : ''}`}
+            onClick={() => setOnlyEpics(o => !o)}
+          >
+            <Icon name={TASK_TYPE_ICONS[EPIC].name} size={14} style={{ color: TASK_TYPE_ICONS[EPIC].color }} />
+            Solo epiche
+          </button>
+          <button
             className={`btn${groupByProject ? ' active' : ''}`}
             onClick={() => setGroupByProject(g => !g)}
           >Raggruppa per progetto</button>
@@ -1023,6 +1058,9 @@ function App() {
         {!getAuthCookie() && <p className="gantt-message">Accedi per vedere i task di quadrato.</p>}
         {getAuthCookie() && projects === null && !loadError && <p className="gantt-message">Caricamento dei task di quadrato…</p>}
         {projects !== null && projects.length === 0 && <p className="gantt-message">Nessun task da fare o in corso.</p>}
+        {onlyEpics && projects !== null && projects.length > 0 && !visibleProjects.some(p => p.tasks.some(t => t.type === EPIC)) && (
+          <p className="gantt-message">Nessuna epica da fare o in corso.</p>
+        )}
         {loadError && <p className="gantt-message gantt-message--error">{loadError}</p>}
         {saveError && <p className="gantt-message gantt-message--error">{saveError}</p>}
         <div className="gantt-card">
