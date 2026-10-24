@@ -168,10 +168,18 @@
   gap: 6px;
 }
 
+/* Takes the room left by the "open in quadrato" link, which then always stays in view: a
+   name too long for it fades out just before the link instead of pushing it out of the cell.
+   A mask rather than a gradient on top, so it fades into whatever background the row has. */
 .task-name {
-  display: inline-flex;
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
   align-items: center;
   gap: 4px;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
 }
 
 .task-name .sg-icon {
