@@ -54,6 +54,11 @@ const TASK_TYPE_ICONS = {
 }
 const TASK_TYPE_PREFIX = new RegExp(`^\\[(${Object.keys(TASK_TYPE_ICONS).join('|')})\\]\\s*`, 'i')
 const EPIC = 'epic'
+// Quadrato's notes ("[note] ...", written down at a time) and events ("[event] ...", tracked in
+// Tome): not work to plan, so they're never bars. An event colors its day instead (toEvents).
+const UNPLANNED_PREFIX = /^\[(note|event)\]/i
+const EVENT_PREFIX = /^\[event\]\s*/i
+const STATUS_SKIPPED = 3
 // Tasks with no due date are all parked in the same column, this far from today.
 const UNSCHEDULED_WEEKS = 3
 // Due time given to a task scheduled for the first time by dragging it.
@@ -65,6 +70,11 @@ const MIN_NAME_WIDTH = 120
 const MAX_NAME_WIDTH = 600
 
 const clampNameWidth = (width) => Math.min(MAX_NAME_WIDTH, Math.max(MIN_NAME_WIDTH, width))
+
+// Grouped, each project's rows go by end, the latest at the top ('latest') or the earliest
+// ('earliest'), or in the user's own order ('manual', dragged by the ⠿). Remembered per browser.
+const ROW_ORDER_KEY = 'gantt-row-order'
+const ROW_ORDERS = ['latest', 'earliest', 'manual']
 
 // The user's project colors, the ones quadrato shows too (by name, in all their workspaces).
 function sharedColors(data) {
@@ -147,6 +157,18 @@ function saveProjectOrder(order) {
   })
 }
 
+// Recorded by the API as a TasksReordered event: the ids are siblings, first to last, and each
+// gets its index as quadrato's `position`, so quadrato's list follows too.
+function saveTaskOrder(ids) {
+  return fetch(`${GANTT_API}/task-order`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getAuthCookie()}` },
+    body: JSON.stringify({ ids }),
+  }).then(res => {
+    if (!res.ok) throw new Error(String(res.status))
+  })
+}
+
 // One day column: the table minus the task-name column, whatever its current width.
 const dayColumnWidth = (table, visibleDays) =>
   (table.offsetWidth - table.querySelector('th.col-name').offsetWidth) / visibleDays
@@ -191,6 +213,10 @@ function toGanttTask(task, depth, parentId) {
     depth,
     // The parent shown in this project (null when it isn't): it ends no earlier than this task.
     parentId,
+    // The parent in quadrato, shown here or not, and the place among the tasks with the same one:
+    // what "Ordine mio" sorts by and saves (byPosition, moveRow).
+    quadratoParentId: task.parentId ?? null,
+    position: task.position ?? null,
     inProgress: task.status === STATUS_IN_PROGRESS,
     unscheduled: !due,
     dueTime: due ? due.slice(11, 19) : null,
@@ -202,6 +228,13 @@ function toGanttTask(task, depth, parentId) {
   }
 }
 
+// The top-level task a task is under (itself if it's one), following parentId among byId's tasks.
+function rootIn(byId, task) {
+  let current = task
+  while (current.parentId != null && byId.has(current.parentId)) current = byId.get(current.parentId)
+  return current
+}
+
 // A top-level task spans its subtasks, at any depth: it ends no earlier than any of them,
 // as in quadrato where it can't be closed while one is open, and starts no later than any
 // of them. Only top-level ones: a deeper task is instead depended on by its subtasks
@@ -211,13 +244,8 @@ function toGanttTask(task, depth, parentId) {
 function withParentEnds(tasks) {
   const result = tasks.map(t => ({ ...t, start: t.ownStart, end: t.ownEnd, raised: false }))
   const byId = new Map(result.map(t => [t.id, t]))
-  const rootOf = (task) => {
-    let current = task
-    while (current.parentId != null && byId.has(current.parentId)) current = byId.get(current.parentId)
-    return current
-  }
   for (const task of result) {
-    const root = rootOf(task)
+    const root = rootIn(byId, task)
     if (root === task || task.unscheduled) continue
     if (Temporal.PlainDate.compare(task.start, root.start) < 0) root.start = task.start
     if ((root.unscheduled && !root.raised) || Temporal.PlainDate.compare(task.end, root.end) > 0) {
@@ -227,6 +255,9 @@ function withParentEnds(tasks) {
   }
   return result
 }
+
+// False for a made-up end: no due date of its own nor, for a top-level task, in its subtasks.
+const hasRealEnd = (task) => !task.unscheduled || task.raised
 
 // Subtasks after their task (resolveConstraints) and top-level tasks stretched over
 // their subtasks (withParentEnds), repeated until nothing moves. movedIds: the bars the
@@ -254,12 +285,66 @@ function sortLikeQuadrato(tasks) {
   return [...due, ...undated].sort((a, b) => Number(b.status === STATUS_IN_PROGRESS) - Number(a.status === STATUS_IN_PROGRESS))
 }
 
+// Epics first, then the other tasks, each top-level task with its subtasks under it and, among
+// epics and among the others, by end (stretched over the subtasks): the latest at the top, or
+// the earliest. Blocks are found by parentId, not by position: the rows may have been dragged.
+function epicsFirstByEnd(tasks, latestFirst) {
+  const byId = new Map(tasks.map(t => [t.id, t]))
+  const blocks = new Map()
+  for (const task of tasks) {
+    const root = rootIn(byId, task)
+    blocks.set(root, [...(blocks.get(root) ?? []), task])
+  }
+  const direction = latestFirst ? -1 : 1
+  return [...blocks.entries()]
+    .sort(([a], [b]) =>
+      Number(a.type !== EPIC) - Number(b.type !== EPIC)
+      // A made-up end says nothing about when it finishes: those go after the dated ones.
+      || Number(!hasRealEnd(a)) - Number(!hasRealEnd(b))
+      || (hasRealEnd(a) ? direction * Temporal.PlainDate.compare(a.end, b.end) : 0))
+    .flatMap(([root, rows]) => [root, ...rows.filter(t => t !== root)])
+}
+
+// Siblings by position; those never placed after them, in the order they came (the sort is stable).
+const byOwnPosition = (a, b) => (a.position ?? Number.MAX_SAFE_INTEGER) - (b.position ?? Number.MAX_SAFE_INTEGER)
+
+// "Ordine mio": each task with its subtasks under it, as in quadrato, siblings by position
+// (set by dragging rows here, or subtasks in quadrato).
+function byPosition(tasks) {
+  const ids = new Set(tasks.map(t => t.id))
+  const children = new Map()
+  for (const task of tasks) {
+    const parent = ids.has(task.parentId) ? task.parentId : null
+    children.set(parent, [...(children.get(parent) ?? []), task])
+  }
+  const visit = (parent) => [...(children.get(parent) ?? [])].sort(byOwnPosition).flatMap(task => [task, ...visit(task.id)])
+  return visit(null)
+}
+
+// The days with an event: quadrato's dated events, but the archived ones, the skipped ones (they
+// didn't take place) and the shopping list's. Done ones count too: the event took place that day.
+// By time, as the strip over the chart lists a day's events.
+function toEvents(tasks) {
+  return tasks
+    .filter(t => EVENT_PREFIX.test(t.title) && t.timestamp && !t.archived && t.status !== STATUS_SKIPPED
+      && (t.project ?? '').trim().toLowerCase() !== SHOPPING_PROJECT)
+    .sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)))
+    .map(t => ({
+      id: t.id,
+      name: t.title.replace(EVENT_PREFIX, ''),
+      projectId: t.project || NO_PROJECT_ID,
+      day: Temporal.PlainDate.from(String(t.timestamp).slice(0, 10)),
+      time: String(t.timestamp).slice(11, 16),
+    }))
+}
+
 // What's being done and what's still to do: open quadrato tasks grouped by project, but
-// the shopping list, each subtask right after its parent and one level deeper. A subtask
-// whose parent isn't shown (closed, archived, in another project) starts its own branch.
+// the shopping list, the notes and the events, each subtask right after its parent and one level
+// deeper. A subtask whose parent isn't shown (closed, archived, a note or an event, in another
+// project) starts its own branch.
 function toProjects(tasks) {
   const open = tasks.filter(t => !t.archived && (t.status === STATUS_TODO || t.status === STATUS_IN_PROGRESS)
-    && (t.project ?? '').trim().toLowerCase() !== SHOPPING_PROJECT)
+    && (t.project ?? '').trim().toLowerCase() !== SHOPPING_PROJECT && !UNPLANNED_PREFIX.test(t.title))
   const byProject = new Map()
   for (const task of open) {
     const name = task.project || ''
@@ -308,6 +393,7 @@ function getColumns(offset, visibleDays) {
       label: date.toLocaleString('it-IT', { day: '2-digit', month: '2-digit' }),
       date,
       isToday: Temporal.PlainDate.compare(date, now) === 0,
+      isWeekend: date.dayOfWeek >= 6,
     }
   })
 }
@@ -413,12 +499,17 @@ function App() {
     localStorage.removeItem(USERNAME_KEY)
     setUsername(null)
     setProjects(null)
+    setEvents([])
   }
 
   // A few days back: with the 14-day default most of the view is what's coming.
   const [offset, setOffset] = useState(-3)
   // null until quadrato's tasks arrive (or while logged out)
   const [projects, setProjects] = useState(null)
+  // See toEvents: each one colors its day's column.
+  const [events, setEvents] = useState([])
+  // Index in `columns` of the day the mouse is over, null off the days.
+  const [hoveredDay, setHoveredDay] = useState(null)
   const [loadError, setLoadError] = useState(null)
   const [saveError, setSaveError] = useState(null)
   // Project name => color, shared with quadrato.
@@ -463,6 +554,7 @@ function App() {
         setProjectColors(colors)
         setProjectOrder(order)
         setProjects(loaded)
+        setEvents(toEvents(json['simplanner-tasks'] ?? []))
       })
       .catch(() => {
         if (!cancelled) setLoadError('Impossibile caricare i task di quadrato.')
@@ -487,6 +579,15 @@ function App() {
   const [onlyEpics, setOnlyEpics] = useState(false)
   // Off: one list of every task, ordered by start date.
   const [groupByProject, setGroupByProject] = useState(true)
+  // See ROW_ORDERS. With "Solo epiche" the projects follow it too, but in "Ordine mio".
+  const [rowOrder, setRowOrder] = useState(() => {
+    const saved = localStorage.getItem(ROW_ORDER_KEY)
+    return ROW_ORDERS.includes(saved) ? saved : 'latest'
+  })
+  const chooseRowOrder = (order) => {
+    setRowOrder(order)
+    localStorage.setItem(ROW_ORDER_KEY, order)
+  }
   const [nameWidth, setNameWidth] = useState(() => {
     const saved = Number(localStorage.getItem(NAME_WIDTH_KEY))
     return saved ? clampNameWidth(saved) : DEFAULT_NAME_WIDTH
@@ -508,6 +609,9 @@ function App() {
   // Ids of the rows on screen, in their order, while a bar is dragged: the rows stay put
   // under the mouse and are re-sorted (and re-filtered) only once it's released.
   const [frozenRows, setFrozenRows] = useState(null)
+  // Ids of the project groups on screen, in their order, while a bar is dragged: with "Solo
+  // epiche" they follow their epics' ends, and would otherwise jump under the mouse.
+  const [frozenProjects, setFrozenProjects] = useState(null)
   // Picked by dragging a rectangle over the bars: dragging one of them moves them all.
   const [selectedIds, setSelectedIds] = useState([])
   // The selection rectangle being drawn, relative to the chart container.
@@ -522,12 +626,39 @@ function App() {
   const loadedProjects = projects ?? []
   // One asked for in the address that isn't here (nothing open in it) shows them all.
   const selectedProject = loadedProjects.find(p => p.id === selectedProjectId) ?? null
-  const visibleProjects = selectedProject ? [selectedProject] : loadedProjects
+  // The events of the project shown, or all of them: what colors a column, listed in the strip
+  // over the chart while the mouse is on it.
+  const shownEvents = selectedProject ? events.filter(e => e.projectId === selectedProject.id) : events
+  const eventsOn = (date) => shownEvents.filter(e => Temporal.PlainDate.compare(e.day, date) === 0)
+  const hoveredColumn = hoveredDay !== null ? columns[hoveredDay] : null
+  const hoveredEvents = hoveredColumn ? eventsOn(hoveredColumn.date) : []
+  // The column under the mouse, anywhere from the header to the last row: the bands let it through.
+  const hoverDay = (e) => {
+    if (dividerX === null) return
+    const box = e.currentTarget.getBoundingClientRect()
+    const x = e.clientX - box.left - dividerX
+    setHoveredDay(x < 0 ? null : Math.min(visibleDays - 1, Math.floor(x / ((box.width - dividerX) / visibleDays))))
+  }
 
   const isPastTask = (task) => Temporal.PlainDate.compare(task.end, today) < 0
+  // Sorted before being filtered: a subtask shown without its task still goes in its block.
   const shownTasks = (project) => frozenRows
-    ? project.tasks.filter(t => frozenRows.includes(t.id))
-    : project.tasks.filter(t => (!hidePastTasks || !isPastTask(t)) && (!onlyEpics || t.type === EPIC))
+    ? project.tasks.filter(t => frozenRows.includes(t.id)).sort((a, b) => frozenRows.indexOf(a.id) - frozenRows.indexOf(b.id))
+    : (rowOrder === 'manual' ? byPosition(project.tasks) : epicsFirstByEnd(project.tasks, rowOrder === 'latest'))
+      .filter(t => (!hidePastTasks || !isPastTask(t)) && (!onlyEpics || t.type === EPIC))
+  // With "Solo epiche", but in "Ordine mio", the projects follow their epics instead of the user's
+  // order: by the end of their first dated epic on screen, in the same direction, those with none last.
+  const byTopEpicEnd = (projects) => {
+    const ends = new Map(projects.map(p => [p.id, shownTasks(p).find(hasRealEnd)?.end]))
+    return [...projects].sort((a, b) => {
+      const [endA, endB] = [ends.get(a.id), ends.get(b.id)]
+      return Number(!endA) - Number(!endB) || (endA ? (rowOrder === 'latest' ? -1 : 1) * Temporal.PlainDate.compare(endA, endB) : 0)
+    })
+  }
+  const visibleProjects = selectedProject ? [selectedProject]
+    : frozenProjects ? frozenProjects.map(id => loadedProjects.find(p => p.id === id))
+    : onlyEpics && rowOrder !== 'manual' ? byTopEpicEnd(loadedProjects)
+    : loadedProjects
   // Not grouped by project: one list by start date (ties by end).
   const flatRows = visibleProjects
     .flatMap(project => shownTasks(project).map(task => ({ task, projectId: project.id })))
@@ -544,6 +675,28 @@ function App() {
     setProjects(prev => prev && prev.map(p =>
       p.id === projectId ? { ...p, tasks: updater(p.tasks) } : p
     ))
+  }
+
+  // "Ordine mio": a dragged task takes the place of the one it's dropped on, among its siblings
+  // only, so it never changes parent here. Every sibling gets its index as position, as when
+  // quadrato reorders subtasks: shown at once, put back if the API doesn't take it. `tasks` is
+  // the project's, passed in: the bar drag handlers are registered once and can't read the state.
+  const moveRow = (projectId, taskId, overId, tasks) => {
+    const task = tasks.find(t => t.id === taskId)
+    const over = tasks.find(t => t.id === overId)
+    if (!task || !over || task.quadratoParentId !== over.quadratoParentId) return
+    const siblings = tasks.filter(t => t.quadratoParentId === task.quadratoParentId)
+    const order = [...siblings].sort(byOwnPosition)
+    const from = order.indexOf(task)
+    const to = order.indexOf(over)
+    order.splice(to, 0, order.splice(from, 1)[0])
+    const setPositions = (positions) => setProjectTasks(projectId, prev =>
+      prev.map(t => positions.has(t.id) ? { ...t, position: positions.get(t.id) } : t))
+    setPositions(new Map(order.map((t, index) => [t.id, index])))
+    saveTaskOrder(order.map(t => t.id)).catch(() => {
+      setPositions(new Map(siblings.map(t => [t.id, t.position])))
+      setSaveError("L'ordine dei task non è stato salvato.")
+    })
   }
 
   // Dropping a bar reschedules the task in quadrato: the due date (end) and/or the
@@ -658,7 +811,8 @@ function App() {
           break
         }
       }
-      setDragOverId(overId !== taskId ? overId : null)
+      drag.overId = overId !== taskId ? overId : null
+      setDragOverId(drag.overId)
     }
     const handleMouseUp = () => {
       if (!dragRef.current) return
@@ -666,6 +820,7 @@ function App() {
       const { taskId, projectId } = drag
       dragRef.current = null
       setFrozenRows(null)
+      setFrozenProjects(null)
       // Recomputed from the tasks as they were at mousedown, so what gets saved doesn't
       // depend on how many mousemoves the state went through.
       const movedIds = new Set(drag.moved.keys())
@@ -684,20 +839,9 @@ function App() {
         }
       }
 
-      setDragOverId(prev => {
-        if (prev !== null && prev !== taskId) {
-          setProjectTasks(projectId, tasks => {
-            const fromIdx = tasks.findIndex(t => t.id === taskId)
-            const toIdx = tasks.findIndex(t => t.id === prev)
-            if (fromIdx === -1 || toIdx === -1) return tasks
-            const next = [...tasks]
-            const [moved] = next.splice(fromIdx, 1)
-            next.splice(toIdx, 0, moved)
-            return next
-          })
-        }
-        return null
-      })
+      setDragOverId(null)
+      // Positions don't change during a drag: the snapshot's are the current ones.
+      if (drag.overId) moveRow(projectId, taskId, drag.overId, drag.snapshots.get(projectId))
     }
     window.addEventListener('mousemove', handleMouseMove)
     window.addEventListener('mouseup', handleMouseUp)
@@ -705,7 +849,7 @@ function App() {
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
     }
-    // Registered once: saveDates from the first render only touches state setters, which never change.
+    // Registered once: saveDates and moveRow from the first render only touch state setters, which never change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -731,15 +875,7 @@ function App() {
         setDragOverId(null)
         return
       }
-      setProjectTasks(projectId, prev => {
-        const fromIdx = prev.findIndex(t => t.id === taskId)
-        const toIdx = prev.findIndex(t => t.id === dragOverId)
-        if (fromIdx === -1 || toIdx === -1) return prev
-        const next = [...prev]
-        const [moved] = next.splice(fromIdx, 1)
-        next.splice(toIdx, 0, moved)
-        return next
-      })
+      moveRow(projectId, taskId, dragOverId, (projects ?? []).find(p => p.id === projectId)?.tasks ?? [])
       setDragOverId(null)
     }
     window.addEventListener('mousemove', handleRowMouseMove)
@@ -748,7 +884,9 @@ function App() {
       window.removeEventListener('mousemove', handleRowMouseMove)
       window.removeEventListener('mouseup', handleRowMouseUp)
     }
-  }, [dragOverId])
+    // moveRow from an older render only touches state setters; the tasks come from `projects`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dragOverId, projects])
 
   useEffect(() => {
     const handleProjectMouseMove = (e) => {
@@ -852,9 +990,10 @@ function App() {
       // The tasks of every project the drag touches, as they were at mousedown.
       snapshots: new Map(group.map(row => [row.projectId, loadedProjects.find(p => p.id === row.projectId).tasks])),
       lastDelta: 0,
-      reorderable: groupByProject && group.length === 1,
+      reorderable: groupByProject && rowOrder === 'manual' && group.length === 1,
     }
-    setFrozenRows(flatRows.map(({ task }) => task.id))
+    setFrozenRows((groupByProject ? visibleProjects.flatMap(p => shownTasks(p)) : flatRows.map(({ task }) => task)).map(t => t.id))
+    setFrozenProjects(visibleProjects.map(p => p.id))
     e.preventDefault()
   }
 
@@ -924,8 +1063,8 @@ function App() {
       >
         <td className="cell-name">
           <div className="cell-name-inner">
-            {/* Rows are reordered, and indented under their parent, only within a project. */}
-            {groupByProject && (
+            {/* Rows are dragged only in "Ordine mio", within a project (moveRow). */}
+            {groupByProject && rowOrder === 'manual' && (
               <span
                 className="drag-handle"
                 onMouseDown={() => { rowDragRef.current = { taskId: task.id, projectId } }}
@@ -1046,6 +1185,25 @@ function App() {
             className={`btn${groupByProject ? ' active' : ''}`}
             onClick={() => setGroupByProject(g => !g)}
           >Raggruppa per progetto</button>
+          {/* Not grouped, the rows go by start date. */}
+          {groupByProject && (
+            <>
+              <span className="subtitle" style={{ marginLeft: '12px' }}>In alto:</span>
+              <button
+                className={`btn${rowOrder === 'earliest' ? ' active' : ''}`}
+                onClick={() => chooseRowOrder('earliest')}
+              >Chi finisce prima</button>
+              <button
+                className={`btn${rowOrder === 'latest' ? ' active' : ''}`}
+                onClick={() => chooseRowOrder('latest')}
+              >Chi finisce dopo</button>
+              <button
+                className={`btn${rowOrder === 'manual' ? ' active' : ''}`}
+                onClick={() => chooseRowOrder('manual')}
+                title="L'ordine che dai trascinando i task dal ⠿: lo stesso di quadrato"
+              >Ordine mio</button>
+            </>
+          )}
           {selectedRows.length > 0 && (
             <>
               <span className="subtitle" style={{ marginLeft: '12px' }}>
@@ -1063,8 +1221,38 @@ function App() {
         )}
         {loadError && <p className="gantt-message gantt-message--error">{loadError}</p>}
         {saveError && <p className="gantt-message gantt-message--error">{saveError}</p>}
+        {/* Empty but for the events of the day the mouse is over: a red column only says there's one. */}
+        <div className="event-strip">
+          {hoveredEvents.length > 0 && (
+            <>
+              <span className="event-strip-day">{hoveredColumn.label}</span>
+              {hoveredEvents.map(event => (
+                <span key={event.id} className="event-strip-item">
+                  <span className="event-strip-dot" style={{ background: projectColors[event.projectId] ?? NO_PROJECT_COLOR }} />
+                  {event.time} {event.name}
+                </span>
+              ))}
+            </>
+          )}
+        </div>
         <div className="gantt-card">
-          <div ref={containerRef} style={{ position: 'relative' }}>
+          {/* A stacking context, so the weekend bands (z-index -1) sit above the card's background but under the rows. */}
+          <div ref={containerRef} style={{ position: 'relative', zIndex: 0 }} onMouseMove={hoverDay} onMouseLeave={() => setHoveredDay(null)}>
+            {/* Laid out as dayColumnWidth measures the columns: the rows' cells span several days, so they can't be colored. */}
+            {dividerX !== null && columns.map(({ label, date, isWeekend }, i) => (
+              <Fragment key={label}>
+                {[isWeekend && 'weekend-band', eventsOn(date).length > 0 && 'event-band'].filter(Boolean).map(band => (
+                  <div
+                    key={band}
+                    className={band}
+                    style={{
+                      left: `calc(${dividerX}px + ${i} * (100% - ${dividerX}px) / ${visibleDays})`,
+                      width: `calc((100% - ${dividerX}px) / ${visibleDays})`,
+                    }}
+                  />
+                ))}
+              </Fragment>
+            ))}
             <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }}>
               {todayLine && (
                 <line
@@ -1112,10 +1300,10 @@ function App() {
               >
                 <tr>
                   <th className="col-name" ref={nameHeaderRef} style={{ width: nameWidth }}>Task</th>
-                  {columns.map(({ label, isToday }) => (
+                  {columns.map(({ label, date, isToday, isWeekend }) => (
                     <th
                       key={label}
-                      className={isToday ? 'col-today' : undefined}
+                      className={[isToday && 'col-today', isWeekend && 'col-weekend', eventsOn(date).length > 0 && 'col-event'].filter(Boolean).join(' ') || undefined}
                       ref={isToday ? todayColRef : null}
                     >{label}</th>
                   ))}
@@ -1134,7 +1322,8 @@ function App() {
                           ref={el => projectHeaderRefs.current[project.id] = el}
                         >
                           <td className="project-header-cell" colSpan={visibleDays + 1}>
-                            {project.id !== NO_PROJECT_ID && (
+                            {/* With "Solo epiche" the order is the epics', not the user's, but in "Ordine mio". */}
+                            {project.id !== NO_PROJECT_ID && (!onlyEpics || rowOrder === 'manual') && (
                               <span
                                 className="drag-handle project-drag-handle"
                                 title="Trascina per spostare il progetto"

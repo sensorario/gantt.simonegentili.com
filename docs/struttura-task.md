@@ -9,6 +9,11 @@ La conversione sta in `src/App.jsx`, in `toProjects` e `toGanttTask`.
 ### Quali task
 
 - Solo quelli **da fare** (`status` 0) e **in corso** (`status` 1), non archiviati: cosa si sta facendo e cosa si dovrà fare.
+- Mai come barre le **note** (titolo che comincia con `[note]`) né gli **eventi** (`[event]`) di quadrato: le note sono appunti con un giorno e un'ora, gli eventi si seguono nel tracker; nessuno dei due è lavoro da pianificare.
+
+### Eventi
+
+Un evento colora di rosso la colonna del suo giorno (quello della scadenza): una fascia trasparente sotto le righe, come quelle del fine settimana, e l'intestazione del giorno. Tra la barra degli strumenti e il Gantt c'è una striscia, vuota finché il mouse non passa su un giorno con degli eventi (dall'intestazione all'ultima riga): allora mostra il giorno e i suoi eventi, per ora, ognuno con il pallino del colore del suo progetto. Contano quelli non archiviati, da fare, in corso o fatti (l'evento c'è stato), non quelli saltati né quelli di `spesa`. Con un progetto solo sullo schermo, solo gli eventi di quel progetto.
 - Raggruppati per `project`; quelli senza progetto finiscono in "Nessun progetto". Con "Raggruppa per progetto" spento diventano un'unica lista ordinata per data di inizio (a parità, per data di fine), senza rientri né maniglia ⠿.
 - I sotto-task (`parentId`) stanno subito sotto il padre, rientrati di un livello. Un sotto-task il cui padre non è mostrato (chiuso, archiviato, in un altro progetto) parte come primo livello.
 
