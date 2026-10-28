@@ -69,6 +69,15 @@
   border-color: #0f172a;
 }
 
+/* "Oggi" quando la vista è già quella iniziale */
+.btn:disabled,
+.btn:disabled:hover {
+  background: #ffffff;
+  border-color: #e2e8f0;
+  color: #94a3b8;
+  cursor: default;
+}
+
 .gantt-card {
   background: #ffffff;
   border-radius: 12px;

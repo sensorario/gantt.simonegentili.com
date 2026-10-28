@@ -61,6 +61,12 @@ const EVENT_PREFIX = /^\[event\]\s*/i
 const STATUS_SKIPPED = 3
 // Tasks with no due date are all parked in the same column, this far from today.
 const UNSCHEDULED_WEEKS = 3
+// The first column, in days from today, when the page opens and with "Oggi": a few days back,
+// so with the 14-day default most of the view is what's coming.
+const START_OFFSET = -3
+// Days a sideways touchpad swipe moves for each column's width swiped: the higher, the more
+// sensitive. At 1 the days would follow the fingers, as when dragging the dates' header.
+const SWIPE_DAYS_PER_COLUMN = 3
 // Due time given to a task scheduled for the first time by dragging it.
 const DEFAULT_DUE_TIME = '09:00:00'
 // The task-name column is resized by dragging its divider; the width is remembered per browser.
@@ -502,8 +508,7 @@ function App() {
     setEvents([])
   }
 
-  // A few days back: with the 14-day default most of the view is what's coming.
-  const [offset, setOffset] = useState(-3)
+  const [offset, setOffset] = useState(START_OFFSET)
   // null until quadrato's tasks arrive (or while logged out)
   const [projects, setProjects] = useState(null)
   // See toEvents: each one colors its day's column.
@@ -782,6 +787,28 @@ function App() {
       window.removeEventListener('mouseup', handleTimelineUp)
     }
   }, [])
+
+  // A sideways swipe on the touchpad moves the days, SWIPE_DAYS_PER_COLUMN for each column's
+  // width swiped; scrolling up and down is left alone. Not passive (React's onWheel is), so
+  // that the swipe doesn't also take the browser back or forward a page.
+  useEffect(() => {
+    const container = containerRef.current
+    let swiped = 0
+    const handleWheel = (e) => {
+      if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return
+      e.preventDefault()
+      const step = dayColumnWidth(container.querySelector('table'), visibleDays) / SWIPE_DAYS_PER_COLUMN
+      // What was left of a swipe the other way doesn't hold this one back.
+      if (Math.sign(e.deltaX) !== Math.sign(swiped)) swiped = 0
+      swiped += e.deltaX
+      const days = Math.trunc(swiped / step)
+      if (days === 0) return
+      swiped -= days * step
+      setOffset(o => o + days)
+    }
+    container.addEventListener('wheel', handleWheel, { passive: false })
+    return () => container.removeEventListener('wheel', handleWheel)
+  }, [visibleDays])
 
   useEffect(() => {
     const handleMouseMove = (e) => {
@@ -1142,6 +1169,12 @@ function App() {
       <div className="app">
         <div className="gantt-header">
           <button className="btn" onClick={() => setOffset(o => o - 1)}>&#8592;</button>
+          <button
+            className="btn"
+            onClick={() => setOffset(START_OFFSET)}
+            disabled={offset === START_OFFSET}
+            title="Torna alla vista iniziale, con oggi vicino all'inizio"
+          >Oggi</button>
           <button className="btn" onClick={() => setOffset(o => o + 1)}>&#8594;</button>
           <span className="subtitle">Giorni:</span>
           {[14, 30, 90, 180, 365].map(d => (
