@@ -1,6 +1,6 @@
 import { Fragment, useState, useEffect, useLayoutEffect, useRef } from 'react'
 import './App.css'
-import { ColorPicker, Icon, SGFooter, QuadratoHeader } from '@sensorario/sg-components'
+import { ColorPicker, Icon, SGFooter, QuadratoHeader, Toggle } from '@sensorario/sg-components'
 import { Temporal } from '@js-temporal/polyfill'
 
 const today = Temporal.Now.plainDateISO()
@@ -175,6 +175,18 @@ function saveTaskOrder(ids) {
   })
 }
 
+// The epics that come before an epic, as the arrows drawn to it say (its dates may still overlap
+// theirs): recorded by the API as an EpicSequenced event.
+function saveEpicSequence(epicId, after) {
+  return fetch(`${GANTT_API}/task/${epicId}/after`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getAuthCookie()}` },
+    body: JSON.stringify({ after }),
+  }).then(res => {
+    if (!res.ok) throw new Error(String(res.status))
+  })
+}
+
 // One day column: the table minus the task-name column, whatever its current width.
 const dayColumnWidth = (table, visibleDays) =>
   (table.offsetWidth - table.querySelector('th.col-name').offsetWidth) / visibleDays
@@ -223,6 +235,8 @@ function toGanttTask(task, depth, parentId) {
     // what "Ordine mio" sorts by and saves (byPosition, moveRow).
     quadratoParentId: task.parentId ?? null,
     position: task.position ?? null,
+    // For an epic, the epics that come before it: an arrow from each, set by dragging its dot.
+    after: task.after ?? [],
     inProgress: task.status === STATUS_IN_PROGRESS,
     unscheduled: !due,
     dueTime: due ? due.slice(11, 19) : null,
@@ -579,12 +593,24 @@ function App() {
     return () => window.removeEventListener('popstate', handlePopState)
   }, [])
   const [visibleDays, setVisibleDays] = useState(14)
-  const [hidePastTasks, setHidePastTasks] = useState(false)
+  // What the toggles under "Mostra:" show: the epics, the other tasks, those already over.
+  const [showEpics, setShowEpics] = useState(true)
+  const [showTasks, setShowTasks] = useState(true)
+  const [showPast, setShowPast] = useState(true)
+  // Never both off, which would leave nothing: turning one off then turns the other on.
+  const toggleEpics = (on) => {
+    setShowEpics(on)
+    if (!on) setShowTasks(true)
+  }
+  const toggleTasks = (on) => {
+    setShowTasks(on)
+    if (!on) setShowEpics(true)
+  }
   // Only the epics, each still spanning its subtasks (withParentEnds), which are hidden.
-  const [onlyEpics, setOnlyEpics] = useState(false)
+  const onlyEpics = showEpics && !showTasks
   // Off: one list of every task, ordered by start date.
   const [groupByProject, setGroupByProject] = useState(true)
-  // See ROW_ORDERS. With "Solo epiche" the projects follow it too, but in "Ordine mio".
+  // See ROW_ORDERS. With only the epics shown (onlyEpics) the projects follow it too, but in "Ordine mio".
   const [rowOrder, setRowOrder] = useState(() => {
     const saved = localStorage.getItem(ROW_ORDER_KEY)
     return ROW_ORDERS.includes(saved) ? saved : 'latest'
@@ -599,6 +625,8 @@ function App() {
   })
   const [dividerX, setDividerX] = useState(null)
   const [arrows, setArrows] = useState([])
+  // An arrow being drawn from an epic's dot to the mouse (chart coordinates), and the epic under it.
+  const [linking, setLinking] = useState(null)
   const [todayLine, setTodayLine] = useState(null)
   const columns = getColumns(offset, visibleDays)
   const todayIndex = columns.findIndex(c => c.isToday)
@@ -614,8 +642,8 @@ function App() {
   // Ids of the rows on screen, in their order, while a bar is dragged: the rows stay put
   // under the mouse and are re-sorted (and re-filtered) only once it's released.
   const [frozenRows, setFrozenRows] = useState(null)
-  // Ids of the project groups on screen, in their order, while a bar is dragged: with "Solo
-  // epiche" they follow their epics' ends, and would otherwise jump under the mouse.
+  // Ids of the project groups on screen, in their order, while a bar is dragged: with only the
+  // epics shown they follow their epics' ends, and would otherwise jump under the mouse.
   const [frozenProjects, setFrozenProjects] = useState(null)
   // Picked by dragging a rectangle over the bars: dragging one of them moves them all.
   const [selectedIds, setSelectedIds] = useState([])
@@ -650,8 +678,8 @@ function App() {
   const shownTasks = (project) => frozenRows
     ? project.tasks.filter(t => frozenRows.includes(t.id)).sort((a, b) => frozenRows.indexOf(a.id) - frozenRows.indexOf(b.id))
     : (rowOrder === 'manual' ? byPosition(project.tasks) : epicsFirstByEnd(project.tasks, rowOrder === 'latest'))
-      .filter(t => (!hidePastTasks || !isPastTask(t)) && (!onlyEpics || t.type === EPIC))
-  // With "Solo epiche", but in "Ordine mio", the projects follow their epics instead of the user's
+      .filter(t => (showPast || !isPastTask(t)) && (t.type === EPIC ? showEpics : showTasks))
+  // With only the epics shown, but in "Ordine mio", the projects follow their epics instead of the user's
   // order: by the end of their first dated epic on screen, in the same direction, those with none last.
   const byTopEpicEnd = (projects) => {
     const ends = new Map(projects.map(p => [p.id, shownTasks(p).find(hasRealEnd)?.end]))
@@ -702,6 +730,71 @@ function App() {
       setPositions(new Map(siblings.map(t => [t.id, t.position])))
       setSaveError("L'ordine dei task non è stato salvato.")
     })
+  }
+
+  // Which epics come before `epicId`: shown at once, put back if the API doesn't take it.
+  const setEpicAfter = (epicId, after, previous) => {
+    const put = (value) => setProjects(prev => prev && prev.map(p => ({
+      ...p,
+      tasks: p.tasks.map(t => t.id === epicId ? { ...t, after: value } : t),
+    })))
+    put(after)
+    saveEpicSequence(epicId, after).then(() => setSaveError(null), () => {
+      put(previous)
+      setSaveError('La sequenza delle epiche non è stata salvata.')
+    })
+  }
+
+  // An epic's dot dropped on another epic: the first comes before the second. Not twice, not
+  // itself, and never round in a circle (the API refuses that too).
+  const linkEpics = (beforeId, epicId) => {
+    const byId = new Map(loadedProjects.flatMap(p => p.tasks).map(t => [t.id, t]))
+    const epic = byId.get(epicId)
+    if (!epic || beforeId === epicId || epic.after.includes(beforeId)) return
+    const toVisit = [beforeId]
+    const seen = new Set()
+    while (toVisit.length > 0) {
+      const id = toVisit.pop()
+      if (id === epicId) {
+        setSaveError("Un'epica non può venire, nemmeno passando per altre, prima di sé stessa.")
+        return
+      }
+      if (seen.has(id)) continue
+      seen.add(id)
+      toVisit.push(...(byId.get(id)?.after ?? []))
+    }
+    setEpicAfter(epicId, [...epic.after, beforeId], epic.after)
+  }
+
+  const unlinkEpics = (beforeId, epicId) => {
+    const epic = loadedProjects.flatMap(p => p.tasks).find(t => t.id === epicId)
+    if (epic) setEpicAfter(epicId, epic.after.filter(id => id !== beforeId), epic.after)
+  }
+
+  // Dragging an epic's dot: the dot keeps the pointer (setPointerCapture) wherever it goes, so its
+  // own handlers follow it; the epic under it is found by position (the arrows let it through).
+  const epicUnder = (e) => document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-epic-id]')?.dataset.epicId ?? null
+  const startLink = (e, epicId) => {
+    e.preventDefault()
+    e.stopPropagation()
+    e.currentTarget.setPointerCapture(e.pointerId)
+    const box = containerRef.current.getBoundingClientRect()
+    const bar = barRefs.current[epicId].getBoundingClientRect()
+    const x1 = bar.right - box.left
+    const y1 = bar.top - box.top + bar.height / 2
+    setLinking({ fromId: epicId, x1, y1, x2: x1, y2: y1, overId: null })
+  }
+  const moveLink = (e) => {
+    if (!linking) return
+    const box = containerRef.current.getBoundingClientRect()
+    const over = epicUnder(e)
+    setLinking({ ...linking, x2: e.clientX - box.left, y2: e.clientY - box.top, overId: over !== linking.fromId ? over : null })
+  }
+  const endLink = (e) => {
+    if (!linking) return
+    const over = epicUnder(e)
+    setLinking(null)
+    if (over) linkEpics(linking.fromId, over)
   }
 
   // Dropping a bar reschedules the task in quadrato: the due date (end) and/or the
@@ -1028,21 +1121,23 @@ function App() {
     if (!containerRef.current) return
     const containerRect = containerRef.current.getBoundingClientRect()
     const newArrows = []
+    // From the end of the bar `beforeId` to the start of `task`'s, when both are on screen.
+    const arrow = (beforeId, task, extra) => {
+      const fromEl = barRefs.current[task.id]
+      const toEl = barRefs.current[beforeId]
+      if (!fromEl || !toEl) return
+      const fromRect = fromEl.getBoundingClientRect()
+      const toRect = toEl.getBoundingClientRect()
+      const x1 = fromRect.left - containerRect.left
+      const y1 = fromRect.top - containerRect.top + fromRect.height / 2
+      const x2 = toRect.right - containerRect.left
+      const y2 = toRect.top - containerRect.top + toRect.height / 2
+      newArrows.push({ x1, y1, x2, y2, ...extra })
+    }
     for (const task of flatTasks) {
       const deps = Array.isArray(task.dependsOn) ? task.dependsOn : task.dependsOn ? [task.dependsOn] : []
-      if (deps.length === 0) continue
-      for (const depId of deps) {
-        const fromEl = barRefs.current[task.id]
-        const toEl = barRefs.current[depId]
-        if (!fromEl || !toEl) continue
-        const fromRect = fromEl.getBoundingClientRect()
-        const toRect = toEl.getBoundingClientRect()
-        const x1 = fromRect.left - containerRect.left
-        const y1 = fromRect.top - containerRect.top + fromRect.height / 2
-        const x2 = toRect.right - containerRect.left
-        const y2 = toRect.top - containerRect.top + toRect.height / 2
-        newArrows.push({ id: `${depId}-${task.id}`, x1, y1, x2, y2 })
-      }
+      for (const depId of deps) arrow(depId, task, { id: `${depId}-${task.id}` })
+      for (const beforeId of task.after) arrow(beforeId, task, { id: `${beforeId}>${task.id}`, epic: true, beforeId, epicId: task.id })
     }
     setArrows(prev => JSON.stringify(prev) === JSON.stringify(newArrows) ? prev : newArrows)
   }, [flatTasks])
@@ -1059,7 +1154,7 @@ function App() {
       x: colRect.left - containerRect.left + colRect.width / 2,
       height: containerRect.height,
     })
-  }, [offset, visibleDays, todayIndex, nameWidth, projects, selectedProjectId, hidePastTasks, groupByProject])
+  }, [offset, visibleDays, todayIndex, nameWidth, projects, selectedProjectId, showPast, showEpics, showTasks, groupByProject])
 
   // The divider sits on the name column's right edge, wherever the table puts it.
   useLayoutEffect(() => {
@@ -1126,10 +1221,11 @@ function App() {
             {firstActive > 0 && <td colSpan={firstActive}></td>}
             <td colSpan={lastActive - firstActive + 1} className="cell-bar">
               <div
-                className={`bar${task.inProgress ? ' bar--doing' : ''}${task.unscheduled ? ' bar--unscheduled' : ''}${selected ? ' bar--selected' : ''}`}
+                className={`bar${task.inProgress ? ' bar--doing' : ''}${task.unscheduled ? ' bar--unscheduled' : ''}${selected ? ' bar--selected' : ''}${linking?.overId === task.id ? ' bar--link-target' : ''}`}
                 style={{ '--project-color': colorOf(projectId), '--project-ink': inkOn(colorOf(projectId)) }}
                 title={task.unscheduled ? 'Senza scadenza: trascinala per pianificarla' : undefined}
                 ref={el => barRefs.current[task.id] = el}
+                data-epic-id={task.type === EPIC ? task.id : undefined}
                 onMouseDown={(e) => handleBarMouseDown(e, task, projectId)}
               >
                 <span
@@ -1142,6 +1238,17 @@ function App() {
                   title="Trascina per spostare la data di fine"
                   onMouseDown={(e) => handleBarMouseDown(e, task, projectId, 'end')}
                 />
+                {task.type === EPIC && (
+                  <span
+                    className="epic-connector"
+                    title="Trascina sull'epica che viene dopo"
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => startLink(e, task.id)}
+                    onPointerMove={moveLink}
+                    onPointerUp={endLink}
+                    onPointerCancel={() => setLinking(null)}
+                  />
+                )}
                 <span className="bar-date bar-date-start">
                   {task.start.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })}
                 </span>
@@ -1167,83 +1274,88 @@ function App() {
         onLogout={handleLogout}
       />
       <div className="app">
+        {/* Groups of buttons for a choice among several (the one lit up), toggles for what's on or off. */}
         <div className="gantt-header">
-          <button className="btn" onClick={() => setOffset(o => o - 1)}>&#8592;</button>
-          <button
-            className="btn"
-            onClick={() => setOffset(START_OFFSET)}
-            disabled={offset === START_OFFSET}
-            title="Torna alla vista iniziale, con oggi vicino all'inizio"
-          >Oggi</button>
-          <button className="btn" onClick={() => setOffset(o => o + 1)}>&#8594;</button>
-          <span className="subtitle">Giorni:</span>
-          {[14, 30, 90, 180, 365].map(d => (
+          <div className="toolbar-group">
+            <button className="btn" onClick={() => setOffset(o => o - 1)}>&#8592;</button>
             <button
-              key={d}
-              className={`btn${visibleDays === d ? ' active' : ''}`}
-              onClick={() => setVisibleDays(d)}
-            >{d}g</button>
-          ))}
-          <span className="subtitle" style={{ marginLeft: '12px' }}>Progetto:</span>
-          <button
-            className={`btn${selectedProject === null ? ' active' : ''}`}
-            onClick={() => selectProject(null)}
-          >Tutti</button>
-          {loadedProjects.map(p => (
-            <span key={p.id} className="project-filter">
-              {p.id !== NO_PROJECT_ID && (
-                <span title={`Colore di ${p.name}`}>
-                  <ColorPicker value={colorOf(p.id)} swatches={PASTELS} onChange={color => changeProjectColor(p.id, color)} />
-                </span>
-              )}
+              className="btn"
+              onClick={() => setOffset(START_OFFSET)}
+              disabled={offset === START_OFFSET}
+              title="Torna alla vista iniziale, con oggi vicino all'inizio"
+            >Oggi</button>
+            <button className="btn" onClick={() => setOffset(o => o + 1)}>&#8594;</button>
+          </div>
+          <div className="toolbar-group">
+            <span className="subtitle">Giorni:</span>
+            {[14, 30, 90, 180, 365].map(d => (
               <button
-                className={`btn${selectedProjectId === p.id ? ' active' : ''}`}
-                onClick={() => selectProject(p.id)}
-              >{p.name}</button>
-            </span>
-          ))}
-          <button
-            className={`btn${hidePastTasks ? ' active' : ''}`}
-            style={{ marginLeft: '12px' }}
-            onClick={() => setHidePastTasks(h => !h)}
-          >Nascondi passati</button>
-          <button
-            className={`btn${onlyEpics ? ' active' : ''}`}
-            onClick={() => setOnlyEpics(o => !o)}
-          >
-            <Icon name={TASK_TYPE_ICONS[EPIC].name} size={14} style={{ color: TASK_TYPE_ICONS[EPIC].color }} />
-            Solo epiche
-          </button>
-          <button
-            className={`btn${groupByProject ? ' active' : ''}`}
-            onClick={() => setGroupByProject(g => !g)}
-          >Raggruppa per progetto</button>
-          {/* Not grouped, the rows go by start date. */}
-          {groupByProject && (
-            <>
-              <span className="subtitle" style={{ marginLeft: '12px' }}>In alto:</span>
-              <button
-                className={`btn${rowOrder === 'earliest' ? ' active' : ''}`}
-                onClick={() => chooseRowOrder('earliest')}
-              >Chi finisce prima</button>
-              <button
-                className={`btn${rowOrder === 'latest' ? ' active' : ''}`}
-                onClick={() => chooseRowOrder('latest')}
-              >Chi finisce dopo</button>
-              <button
-                className={`btn${rowOrder === 'manual' ? ' active' : ''}`}
-                onClick={() => chooseRowOrder('manual')}
-                title="L'ordine che dai trascinando i task dal ⠿: lo stesso di quadrato"
-              >Ordine mio</button>
-            </>
-          )}
+                key={d}
+                className={`btn${visibleDays === d ? ' active' : ''}`}
+                onClick={() => setVisibleDays(d)}
+              >{d}g</button>
+            ))}
+          </div>
+          <div className="toolbar-group">
+            <span className="subtitle">Progetto:</span>
+            <button
+              className={`btn${selectedProject === null ? ' active' : ''}`}
+              onClick={() => selectProject(null)}
+            >Tutti</button>
+            {loadedProjects.map(p => (
+              <span key={p.id} className="project-filter">
+                {p.id !== NO_PROJECT_ID && (
+                  <span title={`Colore di ${p.name}`}>
+                    <ColorPicker value={colorOf(p.id)} swatches={PASTELS} onChange={color => changeProjectColor(p.id, color)} />
+                  </span>
+                )}
+                <button
+                  className={`btn${selectedProjectId === p.id ? ' active' : ''}`}
+                  onClick={() => selectProject(p.id)}
+                >{p.name}</button>
+              </span>
+            ))}
+          </div>
+          <div className="toolbar-group">
+            <span className="subtitle">Mostra:</span>
+            <Toggle
+              checked={showEpics}
+              onChange={toggleEpics}
+              label="Epiche"
+              icons={<Icon name={TASK_TYPE_ICONS[EPIC].name} size={14} style={{ color: TASK_TYPE_ICONS[EPIC].color }} />}
+            />
+            <Toggle checked={showTasks} onChange={toggleTasks} label="Task" />
+            <Toggle checked={showPast} onChange={setShowPast} label="Passati" />
+          </div>
+          <div className="toolbar-group">
+            <Toggle checked={groupByProject} onChange={setGroupByProject} label="Per progetto" />
+            {/* Not grouped, the rows go by start date. */}
+            {groupByProject && (
+              <>
+                <span className="subtitle">In alto:</span>
+                <button
+                  className={`btn${rowOrder === 'earliest' ? ' active' : ''}`}
+                  onClick={() => chooseRowOrder('earliest')}
+                >Chi finisce prima</button>
+                <button
+                  className={`btn${rowOrder === 'latest' ? ' active' : ''}`}
+                  onClick={() => chooseRowOrder('latest')}
+                >Chi finisce dopo</button>
+                <button
+                  className={`btn${rowOrder === 'manual' ? ' active' : ''}`}
+                  onClick={() => chooseRowOrder('manual')}
+                  title="L'ordine che dai trascinando i task dal ⠿: lo stesso di quadrato"
+                >Ordine mio</button>
+              </>
+            )}
+          </div>
           {selectedRows.length > 0 && (
-            <>
-              <span className="subtitle" style={{ marginLeft: '12px' }}>
+            <div className="toolbar-group">
+              <span className="subtitle">
                 {selectedRows.length} {selectedRows.length === 1 ? 'selezionata' : 'selezionate'}
               </span>
               <button className="btn" onClick={() => setSelectedIds([])} title="Anche con Esc">Deseleziona</button>
-            </>
+            </div>
           )}
         </div>
         {!getAuthCookie() && <p className="gantt-message">Accedi per vedere i task di quadrato.</p>}
@@ -1298,9 +1410,12 @@ function App() {
                 <marker id="dep-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
                   <path d="M0,0 L10,5 L0,10 z" className="dep-arrow-head" />
                 </marker>
+                <marker id="epic-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                  <path d="M0,0 L10,5 L0,10 z" className="epic-arrow-head" />
+                </marker>
               </defs>
               {/* From the end of the task depended on (x2, y2) to the start of the dependent one (x1, y1). */}
-              {arrows.map(({ id, x1, y1, x2, y2 }) => (
+              {arrows.filter(a => !a.epic).map(({ id, x1, y1, x2, y2 }) => (
                 <path
                   key={id}
                   className="dep-line"
@@ -1308,6 +1423,20 @@ function App() {
                   d={`M${x2},${y2} C${x2 + 40},${y2} ${x1 - 40},${y1} ${x1},${y1}`}
                 />
               ))}
+              {/* From an epic to one that comes after it, the same way; a click takes it away. */}
+              {arrows.filter(a => a.epic).map(({ id, beforeId, epicId, x1, y1, x2, y2 }) => {
+                const d = `M${x2},${y2} C${x2 + 40},${y2} ${x1 - 40},${y1} ${x1},${y1}`
+                return (
+                  <g key={id} className="epic-link" onClick={() => unlinkEpics(beforeId, epicId)}>
+                    <title>Clic per togliere la freccia</title>
+                    <path className="epic-line-hit" d={d} />
+                    <path className="epic-line" markerEnd="url(#epic-arrow)" d={d} />
+                  </g>
+                )
+              })}
+              {linking && (
+                <path className="epic-line epic-line--drawing" d={`M${linking.x1},${linking.y1} L${linking.x2},${linking.y2}`} />
+              )}
             </svg>
             {marquee && <div className="marquee" style={marquee} />}
             {dividerX !== null && (
@@ -1355,7 +1484,7 @@ function App() {
                           ref={el => projectHeaderRefs.current[project.id] = el}
                         >
                           <td className="project-header-cell" colSpan={visibleDays + 1}>
-                            {/* With "Solo epiche" the order is the epics', not the user's, but in "Ordine mio". */}
+                            {/* With only the epics shown the order is the epics', not the user's, but in "Ordine mio". */}
                             {project.id !== NO_PROJECT_ID && (!onlyEpics || rowOrder === 'manual') && (
                               <span
                                 className="drag-handle project-drag-handle"

@@ -32,15 +32,32 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 10px 24px;
   margin-bottom: 16px;
   flex-wrap: wrap;
+}
+
+.toolbar-group {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
 }
 
 .gantt-header .subtitle {
   font-size: 12px;
   color: #94a3b8;
-  margin-right: 8px;
+}
+
+/* As big as the buttons next to them, and on in the color of the one lit up. */
+.gantt-header .sg-toggle-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #374151;
+}
+
+.gantt-header .sg-toggle-input:checked + .sg-toggle-track {
+  background: #0f172a;
 }
 
 .btn {
@@ -338,6 +355,63 @@
 /* Punta della freccia, sul task dipendente */
 .dep-arrow-head {
   fill: #f87171;
+}
+
+/* Epiche in sequenza: quale viene prima e quale dopo (le date possono accavallarsi). Piena e
+   arancio come l'icona delle epiche, non tratteggiata e rossa come le dipendenze tra task. */
+.epic-line {
+  stroke: #e08a2e;
+  stroke-width: 2;
+  fill: none;
+}
+
+.epic-arrow-head {
+  fill: #e08a2e;
+}
+
+/* Più larga della freccia e invisibile: è lei che prende il clic per toglierla */
+.epic-line-hit {
+  stroke: transparent;
+  stroke-width: 12;
+  fill: none;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.epic-link:hover .epic-line {
+  stroke-width: 3;
+}
+
+.epic-line--drawing {
+  stroke-dasharray: 4 3;
+  pointer-events: none;
+}
+
+/* Il pallino da trascinare sull'epica che viene dopo, prima della maniglia della fine */
+.epic-connector {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  width: 10px;
+  height: 10px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: #e08a2e;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.25);
+  cursor: crosshair;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 2;
+}
+
+.bar:hover .epic-connector {
+  opacity: 1;
+}
+
+.bar--link-target {
+  outline: 2px solid #e08a2e;
+  outline-offset: 2px;
 }
 
 .today-line {
