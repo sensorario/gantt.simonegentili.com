@@ -1,4 +1,4 @@
-.PHONY: deploy deploy-log
+.PHONY: deploy deploy-log test
 
 deploy:
 	@nohup ./scripts/deploy.sh >/dev/null 2>&1 & disown
@@ -6,3 +6,7 @@ deploy:
 
 deploy-log:
 	@tail -f log/deploy/latest.log
+
+# Every test of the app (vitest run), in the foreground: a failure fails the target.
+test:
+	@npm test --silent

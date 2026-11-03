@@ -1,6 +1,6 @@
 import { Fragment, useState, useEffect, useLayoutEffect, useRef } from 'react'
 import './App.css'
-import { ColorPicker, Icon, SGFooter, QuadratoHeader, Toggle } from '@sensorario/sg-components'
+import { ColorPicker, Icon, SGFooter, QuadratoHeader, Toggle, clearAccessToken, getAccessToken, setAccessToken } from '@sensorario/sg-components'
 import { Temporal } from '@js-temporal/polyfill'
 
 const today = Temporal.Now.plainDateISO()
@@ -136,7 +136,7 @@ function inkOn(hex) {
 function saveProjectColor(name, color, random = false) {
   return fetch(`${GANTT_API}/project-color`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getAuthCookie()}` },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getAccessToken()}` },
     body: JSON.stringify(random ? { project: name, color, random } : { project: name, color }),
   }).then(res => {
     if (!res.ok) throw new Error(String(res.status))
@@ -156,7 +156,7 @@ function inUserOrder(projects, order) {
 function saveProjectOrder(order) {
   return fetch(`${GANTT_API}/project-order`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getAuthCookie()}` },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getAccessToken()}` },
     body: JSON.stringify({ order }),
   }).then(res => {
     if (!res.ok) throw new Error(String(res.status))
@@ -168,7 +168,7 @@ function saveProjectOrder(order) {
 function saveTaskOrder(ids) {
   return fetch(`${GANTT_API}/task-order`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getAuthCookie()}` },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getAccessToken()}` },
     body: JSON.stringify({ ids }),
   }).then(res => {
     if (!res.ok) throw new Error(String(res.status))
@@ -180,7 +180,7 @@ function saveTaskOrder(ids) {
 function saveEpicSequence(epicId, after) {
   return fetch(`${GANTT_API}/task/${epicId}/after`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getAuthCookie()}` },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getAccessToken()}` },
     body: JSON.stringify({ after }),
   }).then(res => {
     if (!res.ok) throw new Error(String(res.status))
@@ -194,21 +194,7 @@ const dayColumnWidth = (table, visibleDays) =>
 // Cookie condiviso su .simonegentili.com: un utente già autenticato su un
 // altro prodotto della famiglia (es. quadrato) risulta loggato anche qui.
 const AUTH_URL = `${GANTT_API}/authenticate`
-const COOKIE_NAME = 'simonegentili.com-access-token'
 const USERNAME_KEY = 'simonegentili.com-username'
-
-function setAuthCookie(token) {
-  document.cookie = `${COOKIE_NAME}=${token}; path=/; domain=.simonegentili.com; secure; samesite=strict`
-}
-
-function clearAuthCookie() {
-  document.cookie = `${COOKIE_NAME}=; path=/; domain=.simonegentili.com; expires=Thu, 01 Jan 1970 00:00:00 GMT; secure; samesite=strict`
-}
-
-function getAuthCookie() {
-  const entry = document.cookie.split('; ').find(c => c.startsWith(`${COOKIE_NAME}=`))
-  return entry ? entry.slice(COOKIE_NAME.length + 1) : null
-}
 
 const dayOf = (unixSeconds) =>
   Temporal.Instant.fromEpochMilliseconds(unixSeconds * 1000).toZonedDateTimeISO('Europe/Rome').toPlainDate()
@@ -510,12 +496,12 @@ function App() {
     }
     const { token } = await res.json()
     localStorage.setItem(USERNAME_KEY, loginUsername)
-    setAuthCookie(token)
+    setAccessToken(token)
     setUsername(loginUsername)
   }
 
   const handleLogout = () => {
-    clearAuthCookie()
+    clearAccessToken()
     localStorage.removeItem(USERNAME_KEY)
     setUsername(null)
     setProjects(null)
@@ -539,13 +525,13 @@ function App() {
 
   useEffect(() => {
     // The cookie is shared across *.simonegentili.com: a login in quadrato counts here too.
-    const token = getAuthCookie()
+    const token = getAccessToken()
     if (!token) return
     let cancelled = false
     fetch(`${QUADRATO_API}/data`, { headers: { Authorization: `Bearer ${token}` } })
       .then(res => {
         if (res.status === 401) {
-          clearAuthCookie()
+          clearAccessToken()
           localStorage.removeItem(USERNAME_KEY)
           setUsername(null)
           return null
@@ -808,7 +794,7 @@ function App() {
     try {
       const res = await fetch(`${GANTT_API}/task/${taskId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getAuthCookie()}` },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getAccessToken()}` },
         body: JSON.stringify(body),
       })
       if (res.status === 401) {
@@ -1358,8 +1344,8 @@ function App() {
             </div>
           )}
         </div>
-        {!getAuthCookie() && <p className="gantt-message">Accedi per vedere i task di quadrato.</p>}
-        {getAuthCookie() && projects === null && !loadError && <p className="gantt-message">Caricamento dei task di quadrato…</p>}
+        {!getAccessToken() && <p className="gantt-message">Accedi per vedere i task di quadrato.</p>}
+        {getAccessToken() && projects === null && !loadError && <p className="gantt-message">Caricamento dei task di quadrato…</p>}
         {projects !== null && projects.length === 0 && <p className="gantt-message">Nessun task da fare o in corso.</p>}
         {onlyEpics && projects !== null && projects.length > 0 && !visibleProjects.some(p => p.tasks.some(t => t.type === EPIC)) && (
           <p className="gantt-message">Nessuna epica da fare o in corso.</p>
