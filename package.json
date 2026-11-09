@@ -13,7 +13,7 @@
     },
     "dependencies": {
         "@js-temporal/polyfill": "^0.5.1",
-        "@sensorario/sg-components": "^0.0.125",
+        "@sensorario/sg-components": "^0.0.126",
         "react": "^19.2.5",
         "react-dom": "^19.2.5"
     },
