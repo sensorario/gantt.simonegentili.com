@@ -66,3 +66,56 @@ describe('what the toolbar shows', () => {
     expect(rows()).toEqual(['Design', 'Documentazione', 'Login rotto'])
   })
 })
+
+describe('deadlines and epics on the bars', () => {
+  // "YYYY-MM-DD" `days` from now, as quadrato's `deadline`.
+  const dayIn = (days) => dueIn(days).slice(0, 10)
+
+  const load = (data) => {
+    document.cookie = `${COOKIE}=test-token; path=/`
+    vi.stubGlobal('fetch', vi.fn(async (url) => ({
+      ok: true,
+      status: 200,
+      json: async () => (String(url).endsWith('/quadrato/data') ? data : { apps: [] }),
+    })))
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    document.cookie = `${COOKIE}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`
+  })
+
+  const barOf = (name) => [...document.querySelectorAll('tr')]
+    .find(row => row.querySelector('.task-name')?.textContent.trim() === name)
+    .querySelector('.bar')
+
+  it('draws the days after a deadline that was gone past in another color', async () => {
+    load({
+      ...DATA,
+      'simplanner-tasks': [
+        task('late', 'Bolletta', 'alpha', 2, { deadline: dayIn(0) }),
+        task('fine', 'Affitto', 'alpha', 2, { deadline: dayIn(5) }),
+        task('none', 'Senza', 'alpha', 2),
+      ],
+    })
+    render(<App />)
+    await waitFor(() => expect(rows()).toEqual(['Affitto', 'Bolletta', 'Senza']))
+
+    expect(barOf('Bolletta').querySelector('.bar-overrun')).not.toBeNull()
+    expect(barOf('Bolletta').title).toMatch(/^Scadenza: .*, superata$/)
+    expect(barOf('Affitto').querySelector('.bar-overrun')).toBeNull()
+    expect(barOf('Affitto').title).toMatch(/^Scadenza: /)
+    expect(barOf('Senza').querySelector('.bar-overrun')).toBeNull()
+  })
+
+  it('links an epic down to the task that starts first and up from the one that ends last', async () => {
+    load(DATA)
+    render(<App />)
+    await waitFor(() => expect(rows()).toEqual(['Design', 'Documentazione', 'Lancio', 'Login rotto', 'Migrazione']))
+
+    // Only "Lancio" has a task under it: "Migrazione" has none.
+    await waitFor(() => expect(document.querySelectorAll('.epic-span-line')).toHaveLength(2))
+    expect(document.querySelectorAll('.epic-span-line--down')).toHaveLength(1)
+    expect(document.querySelectorAll('.epic-span-line--up')).toHaveLength(1)
+  })
+})

@@ -54,9 +54,10 @@ const TASK_TYPE_ICONS = {
 }
 const TASK_TYPE_PREFIX = new RegExp(`^\\[(${Object.keys(TASK_TYPE_ICONS).join('|')})\\]\\s*`, 'i')
 const EPIC = 'epic'
-// Quadrato's notes ("[note] ...", written down at a time) and events ("[event] ...", tracked in
-// Tome): not work to plan, so they're never bars. An event colors its day instead (toEvents).
-const UNPLANNED_PREFIX = /^\[(note|event)\]/i
+// Quadrato's notes ("[note] ...", written down at a time), events ("[event] ...", tracked in
+// Tome) and goals ("[goal] ...", time to spend each day, week or month): not work to plan, so
+// they're never bars. An event colors its day instead (toEvents).
+const UNPLANNED_PREFIX = /^\[(note|event|goal)\]/i
 const EVENT_PREFIX = /^\[event\]\s*/i
 const STATUS_SKIPPED = 3
 // Tasks with no due date are all parked in the same column, this far from today.
@@ -226,6 +227,9 @@ function toGanttTask(task, depth, parentId) {
     inProgress: task.status === STATUS_IN_PROGRESS,
     unscheduled: !due,
     dueTime: due ? due.slice(11, 19) : null,
+    // The last day it can be done, set in quadrato, which never moves by itself: the end above is
+    // the day to work on it, which quadrato's cron keeps bringing to today while the task is open.
+    deadline: task.deadline ? Temporal.PlainDate.from(task.deadline) : null,
     start,
     end,
     // The task's own dates; `start` and `end` may be stretched over its subtasks (withParentEnds).
@@ -1125,6 +1129,28 @@ function App() {
       for (const depId of deps) arrow(depId, task, { id: `${depId}-${task.id}` })
       for (const beforeId of task.after) arrow(beforeId, task, { id: `${beforeId}>${task.id}`, epic: true, beforeId, epicId: task.id })
     }
+    // An epic is no work of its own, only where a bundle of tasks starts and ends: an arrow goes
+    // down from it to the task that starts first, and one goes up to it from the task that ends
+    // last. Parked tasks (no due date) don't count, as they don't stretch it (withParentEnds).
+    const byId = new Map(flatTasks.map(t => [t.id, t]))
+    for (const epic of flatTasks.filter(t => t.type === EPIC)) {
+      const bundle = flatTasks.filter(t => t !== epic && !t.unscheduled && barRefs.current[t.id] && (() => {
+        for (let up = byId.get(t.parentId); up; up = byId.get(up.parentId)) if (up === epic) return true
+        return false
+      })())
+      const epicEl = barRefs.current[epic.id]
+      if (!epicEl || bundle.length === 0) continue
+      const first = bundle.reduce((a, b) => Temporal.PlainDate.compare(b.start, a.start) < 0 ? b : a)
+      const last = bundle.reduce((a, b) => Temporal.PlainDate.compare(b.end, a.end) > 0 ? b : a)
+      const epicRect = epicEl.getBoundingClientRect()
+      const firstRect = barRefs.current[first.id].getBoundingClientRect()
+      const lastRect = barRefs.current[last.id].getBoundingClientRect()
+      const below = epicRect.bottom - containerRect.top
+      const down = firstRect.left - containerRect.left + 4
+      const up = lastRect.right - containerRect.left - 4
+      newArrows.push({ id: `${epic.id}v${first.id}`, span: 'down', x1: down, y1: below, x2: down, y2: firstRect.top - containerRect.top })
+      newArrows.push({ id: `${last.id}^${epic.id}`, span: 'up', x1: up, y1: lastRect.top - containerRect.top, x2: up, y2: below })
+    }
     setArrows(prev => JSON.stringify(prev) === JSON.stringify(newArrows) ? prev : newArrows)
   }, [flatTasks])
 
@@ -1162,6 +1188,14 @@ function App() {
     const firstActive = columns.findIndex(({ date }) => isBetween(date, task.start, task.end))
     const lastActive = columns.findLastIndex(({ date }) => isBetween(date, task.start, task.end))
     const selected = selectedIds.includes(task.id)
+    // Gone past its deadline: the days after it are drawn in another color, so the deadline and
+    // how far the work went beyond it both stay in sight. From where the bar starts, in percent.
+    const overdue = task.deadline && Temporal.PlainDate.compare(task.end, task.deadline) > 0
+    const overrunColumn = overdue && firstActive !== -1
+      ? columns.findIndex(({ date }) => Temporal.PlainDate.compare(date, task.deadline) > 0 && isBetween(date, task.start, task.end))
+      : -1
+    const overrunLeft = overrunColumn === -1 ? null : ((overrunColumn - firstActive) / (lastActive - firstActive + 1)) * 100
+    const deadlineText = task.deadline?.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
 
     return (
       <tr
@@ -1209,11 +1243,14 @@ function App() {
               <div
                 className={`bar${task.inProgress ? ' bar--doing' : ''}${task.unscheduled ? ' bar--unscheduled' : ''}${selected ? ' bar--selected' : ''}${linking?.overId === task.id ? ' bar--link-target' : ''}`}
                 style={{ '--project-color': colorOf(projectId), '--project-ink': inkOn(colorOf(projectId)) }}
-                title={task.unscheduled ? 'Senza scadenza: trascinala per pianificarla' : undefined}
+                title={task.unscheduled
+                  ? 'Senza scadenza: trascinala per pianificarla'
+                  : task.deadline ? `Scadenza: ${deadlineText}${overdue ? ', superata' : ''}` : undefined}
                 ref={el => barRefs.current[task.id] = el}
                 data-epic-id={task.type === EPIC ? task.id : undefined}
                 onMouseDown={(e) => handleBarMouseDown(e, task, projectId)}
               >
+                {overrunLeft !== null && <span className="bar-overrun" style={{ left: `${overrunLeft}%` }} />}
                 <span
                   className="bar-handle bar-handle--start"
                   title="Trascina per spostare la data di inizio"
@@ -1399,9 +1436,12 @@ function App() {
                 <marker id="epic-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
                   <path d="M0,0 L10,5 L0,10 z" className="epic-arrow-head" />
                 </marker>
+                <marker id="epic-span-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+                  <path d="M0,0 L10,5 L0,10 z" className="epic-arrow-head" />
+                </marker>
               </defs>
               {/* From the end of the task depended on (x2, y2) to the start of the dependent one (x1, y1). */}
-              {arrows.filter(a => !a.epic).map(({ id, x1, y1, x2, y2 }) => (
+              {arrows.filter(a => !a.epic && !a.span).map(({ id, x1, y1, x2, y2 }) => (
                 <path
                   key={id}
                   className="dep-line"
@@ -1420,6 +1460,10 @@ function App() {
                   </g>
                 )
               })}
+              {/* An epic's bundle: down to the task that starts first, up from the one that ends last. */}
+              {arrows.filter(a => a.span).map(({ id, span, x1, y1, x2, y2 }) => (
+                <line key={id} className={`epic-span-line epic-span-line--${span}`} markerEnd="url(#epic-span-arrow)" x1={x1} y1={y1} x2={x2} y2={y2} />
+              ))}
               {linking && (
                 <path className="epic-line epic-line--drawing" d={`M${linking.x1},${linking.y1} L${linking.x2},${linking.y2}`} />
               )}

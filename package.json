@@ -1,7 +1,7 @@
 {
     "name": "gantt.simonegentili.com",
     "private": true,
-    "version": "0.0.45",
+    "version": "0.0.46",
     "type": "module",
     "scripts": {
         "dev": "vite",
@@ -13,7 +13,7 @@
     },
     "dependencies": {
         "@js-temporal/polyfill": "^0.5.1",
-        "@sensorario/sg-components": "^0.0.126",
+        "@sensorario/sg-components": "^0.0.129",
         "react": "^19.2.5",
         "react-dom": "^19.2.5"
     },
